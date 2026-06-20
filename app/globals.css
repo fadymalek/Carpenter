@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --cream: #F7F2EA;
+  --paper: #FBF8F2;
+  --sand: #EBE1D2;
+  --oak: #B0794A;
+  --oak-deep: #9A6638;
+  --walnut: #6B4A30;
+  --walnut-dark: #3E2C1E;
+  --charcoal: #241F1B;
+  --ink: #33291F;
+  --muted: #7C6A57;
+  --line: #E0D4C1;
+  --line-dark: #5A4632;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--cream);
+}
