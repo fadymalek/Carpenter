@@ -4,7 +4,7 @@ import * as THREE from "three";
 import {
   ChefHat, Briefcase, ArrowRight, ArrowLeft, Check, Ruler, Layers, Boxes,
   ClipboardList, Send, Minus, Plus, RotateCcw, Download, Upload, Globe,
-  Sparkles, Info, MousePointer2, Wrench, X,
+  Sparkles, Info, MousePointer2, Wrench, X, Maximize2, GripVertical, Trash2,
 } from "lucide-react";
 import { buildKitchen, buildDesk, disposeGroup } from "./build3d";
 
@@ -175,6 +175,22 @@ const HARDWARE = [
 
 const colorOf = (list, id) => (list.find((x) => x.id === id) || list[0]).c;
 
+/* ---- modular kitchen units (the box-by-box builder) ---- */
+const uid = () => Math.random().toString(36).slice(2, 9);
+const UNIT_KINDS = [
+  { id: "door", l: L("Door cabinet", "خزانة باب"), icon: "▯", min: 30, max: 100, def: 60 },
+  { id: "drawers", l: L("Drawers", "أدراج"), icon: "≣", min: 30, max: 90, def: 60 },
+  { id: "open", l: L("Open shelves", "رفوف مفتوحة"), icon: "▭", min: 30, max: 90, def: 60 },
+  { id: "sink", l: L("Sink", "حوض"), icon: "◠", min: 45, max: 120, def: 90 },
+  { id: "oven", l: L("Oven + hob", "فرن + بوتاجاز"), icon: "▦", min: 50, max: 90, def: 60 },
+  { id: "dishwasher", l: L("Dishwasher", "غسالة أطباق"), icon: "◫", min: 45, max: 60, def: 60 },
+];
+const unitKind = (id) => UNIT_KINDS.find((k) => k.id === id) || UNIT_KINDS[0];
+const makeUnit = (kind = "door") => ({ id: uid(), kind, w: unitKind(kind).def });
+const defaultKUnits = () => [
+  makeUnit("drawers"), makeUnit("sink"), makeUnit("door"), makeUnit("oven"), makeUnit("drawers"),
+];
+
 /* ---- richer material swatch fills (CSS preview of the real texture) ---- */
 const GRAIN_IDS = ["oak", "walnut", "ash", "espresso", "bamboo", "butcher"];
 const _shade = (hex, amt) => {
@@ -205,6 +221,7 @@ function swatchBg(id, c) {
 const DEFAULTS = {
   product: "kitchen",
   kW: 300, kH: 240, kD: 60, kLayout: "straight", kLower: 4, kUpper: 4, kTall: false, kIsland: false,
+  kUnits: defaultKUnits(), selectedUnit: null,
   dW: 140, dD: 70, dH: 74, dShape: "straight", dDrawers: 2, dShelves: 1, dSide: false, dCable: true, dMonitor: false, dKeyboard: false,
   wood: "oak", gloss: false, handle: "bar", hardware: "premium", doorStyle: "shaker", led: false,
   counter: "quartzw", backsplash: "tile",
@@ -219,9 +236,12 @@ function priceRange(cfg) {
   const hw = HARDWARE.find((h) => h.id === cfg.hardware).m;
   let p;
   if (cfg.product === "kitchen") {
-    p = 6000 * (cfg.kW / 100) + 1200 * cfg.kLower + 900 * cfg.kUpper;
+    const units = cfg.kUnits || [];
+    const perUnit = { door: 1600, drawers: 2600, open: 1100, sink: 3200, oven: 5200, dishwasher: 3800 };
+    p = 5000 * (cfg.kW / 100) + 900 * cfg.kUpper;
+    p += units.reduce((a, u) => a + (perUnit[u.kind] || 1600), 0);
     p += (cfg.kTall ? 5000 : 0) + (cfg.kIsland ? 12000 : 0);
-    p += (cfg.oven ? 3000 : 0) + (cfg.microwave ? 1500 : 0) + (cfg.pantry ? 4000 : 0);
+    p += (cfg.microwave ? 1500 : 0) + (cfg.pantry ? 4000 : 0) + (cfg.fridge ? 2000 : 0);
     p += (cfg.corner ? 2500 : 0) + (cfg.openShelf ? 1200 : 0) + (cfg.led ? 1800 : 0);
     p += { quartzw: 4000, granite: 6000, butcher: 3000, marble: 9000, concrete: 3500 }[cfg.counter] || 0;
     p += { shaker: 0, flat: 600, slab: 1200, glass: 2400 }[cfg.doorStyle] || 0;
@@ -260,13 +280,15 @@ function studioEnv(renderer) {
 }
 
 /* ========================= 3D PREVIEW ========================= */
-function Preview3D({ config, lang, snapRef }) {
+function Preview3D({ config, lang, snapRef, onPickUnit, onReorder }) {
   const mountRef = useRef(null);
   const S = useRef(null);
+  const propsRef = useRef({});
+  propsRef.current = { config, onPickUnit, onReorder };
 
   const geoSig = useMemo(() => {
-    const k = ["product", "kW", "kH", "kD", "kLayout", "kLower", "kUpper", "kTall", "kIsland", "dW", "dD", "dH", "dShape", "dDrawers", "dShelves", "dSide", "dCable", "dMonitor", "dKeyboard", "wood", "gloss", "counter", "backsplash", "deskTop", "leg", "corner", "sink", "oven", "fridge", "microwave", "openShelf", "pantry", "closed", "cpu", "printer", "fileCab", "cableHole", "grommet", "doorStyle", "led"];
-    return k.map((x) => config[x]).join("|");
+    const k = ["product", "kW", "kH", "kD", "kLayout", "kUpper", "kTall", "kIsland", "dW", "dD", "dH", "dShape", "dDrawers", "dShelves", "dSide", "dCable", "dMonitor", "dKeyboard", "wood", "gloss", "counter", "backsplash", "deskTop", "leg", "fridge", "microwave", "openShelf", "pantry", "closed", "cpu", "printer", "fileCab", "cableHole", "grommet", "doorStyle", "led"];
+    return k.map((x) => config[x]).join("|") + "|" + JSON.stringify(config.kUnits || []) + "|" + (config.selectedUnit || "");
   }, [config]);
 
   // init once
@@ -323,6 +345,21 @@ function Preview3D({ config, lang, snapRef }) {
       renderer, scene, camera, key, ground, envTex, model: null, lastProduct: null,
       theta: Math.PI * 0.78, phi: 1.02, radius: 6, target: new THREE.Vector3(0, 0.6, 0),
       dragging: false, px: 0, py: 0, auto: !reduce, raf: 0, failed: false,
+      ray: new THREE.Raycaster(), ndc: new THREE.Vector2(), dragMode: "orbit", downUnit: null, moved: false, accum: 0,
+    };
+
+    // find which kitchen unit (if any) sits under the pointer
+    const pickUnit = (e) => {
+      const s = S.current; if (!s || !s.model) return null;
+      const r = el.getBoundingClientRect();
+      s.ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+      s.ray.setFromCamera(s.ndc, camera);
+      const hits = s.ray.intersectObjects(s.model.children, true);
+      for (const hit of hits) {
+        let o = hit.object;
+        while (o) { if (o.userData && o.userData.unitId) return { id: o.userData.unitId, index: o.userData.unitIndex }; o = o.parent; }
+      }
+      return null;
     };
 
     const updateCam = () => {
@@ -334,14 +371,39 @@ function Preview3D({ config, lang, snapRef }) {
     S.current.updateCam = updateCam;
 
     const el = renderer.domElement;
-    const onDown = (e) => { const s = S.current; s.dragging = true; s.auto = false; s.px = e.clientX; s.py = e.clientY; el.setPointerCapture && el.setPointerCapture(e.pointerId); };
+    const onDown = (e) => {
+      const s = S.current; s.dragging = true; s.auto = false; s.px = e.clientX; s.py = e.clientY; s.moved = false; s.accum = 0;
+      const { config: cfg } = propsRef.current;
+      s.downUnit = (cfg && cfg.product === "kitchen") ? pickUnit(e) : null;
+      // drag-to-reorder only when grabbing the already-selected unit
+      s.dragMode = (s.downUnit && cfg && s.downUnit.id === cfg.selectedUnit) ? "unit" : "orbit";
+      el.setPointerCapture && el.setPointerCapture(e.pointerId);
+    };
     const onMove = (e) => {
       const s = S.current; if (!s.dragging) return;
-      s.theta -= (e.clientX - s.px) * 0.008;
-      s.phi = Math.max(0.2, Math.min(1.45, s.phi - (e.clientY - s.py) * 0.006));
+      const dx = e.clientX - s.px, dy = e.clientY - s.py;
+      if (Math.abs(dx) + Math.abs(dy) > 5) s.moved = true;
+      if (s.dragMode === "unit" && propsRef.current.onReorder) {
+        s.accum += dx; s.px = e.clientX; s.py = e.clientY;
+        const step = 40;
+        if (Math.abs(s.accum) > step) {
+          const dir = s.accum > 0 ? 1 : -1; s.accum = 0;
+          propsRef.current.onReorder(s.downUnit.id, dir);
+        }
+        return;
+      }
+      s.theta -= dx * 0.008;
+      s.phi = Math.max(0.2, Math.min(1.45, s.phi - dy * 0.006));
       s.px = e.clientX; s.py = e.clientY; updateCam();
     };
-    const onUp = (e) => { const s = S.current; s.dragging = false; el.releasePointerCapture && el.releasePointerCapture(e.pointerId); };
+    const onUp = (e) => {
+      const s = S.current; if (!s) return;
+      if (!s.moved && s.dragMode !== "unit" && propsRef.current.onPickUnit) {
+        propsRef.current.onPickUnit(s.downUnit ? s.downUnit.id : null);
+      }
+      s.dragging = false; s.downUnit = null; s.dragMode = "orbit";
+      el.releasePointerCapture && el.releasePointerCapture(e.pointerId);
+    };
     const onWheel = (e) => { e.preventDefault(); const s = S.current; s.radius = Math.max(2.2, Math.min(16, s.radius + e.deltaY * 0.0025)); updateCam(); };
     el.addEventListener("pointerdown", onDown);
     el.addEventListener("pointermove", onMove);
@@ -530,6 +592,73 @@ function FieldLabel({ children }) {
 
 const inputStyle = { width: "100%", fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 15.5, color: C.ink, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 3, padding: "13px 15px", outline: "none", boxSizing: "border-box" };
 
+/* ===================== MODULAR CABINET BUILDER ===================== */
+function UnitBuilder({ cfg, lang, uctl }) {
+  const tt = (en, ar) => (lang === "ar" ? ar : en);
+  const units = cfg.kUnits || [];
+  const total = units.reduce((a, u) => a + (u.w || 60), 0) || 1;
+  const sel = units.find((u) => u.id === cfg.selectedUnit);
+  const drag = useRef({ from: null });
+  const miniBtn = { cursor: "pointer", flex: 1, padding: "9px 10px", borderRadius: 4, border: `1.5px solid ${C.lineDark}`, background: "transparent", color: C.walnutDark, fontFamily: "'Hanken Grotesk',sans-serif", fontWeight: 600, fontSize: 13 };
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <FieldLabel>{tt("Cabinet layout — box by box", "بناء الخزائن — حتة حتة")}</FieldLabel>
+      <p style={{ fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 13.5, color: C.muted, marginTop: -6, marginBottom: 12, lineHeight: 1.5 }}>
+        {tt("Tap a box to edit it · drag to reorder · or drag the highlighted box inside the 3D view.", "دوس على صندوق لتعديله · اسحبه لإعادة الترتيب · أو اسحب الصندوق المظلّل جوّه مشهد الـ 3D.")}
+      </p>
+
+      {/* top-down lane (2D plan) */}
+      <div style={{ display: "flex", gap: 4, border: `1px solid ${C.line}`, background: C.cream, borderRadius: 8, padding: 8, overflowX: "auto" }}>
+        {units.length === 0 && <span style={{ fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 13, color: C.muted, padding: "20px 12px" }}>{tt("Add your first cabinet below.", "أضف أول خزانة من تحت.")}</span>}
+        {units.map((u, i) => {
+          const k = unitKind(u.kind); const active = u.id === cfg.selectedUnit;
+          return (
+            <div key={u.id} draggable
+              onDragStart={() => { drag.current.from = i; }}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => { if (drag.current.from != null) uctl.move(drag.current.from, i); drag.current.from = null; }}
+              onClick={() => uctl.select(u.id)} title={k.l[lang]}
+              style={{ flex: `${u.w} 1 ${Math.max(58, (u.w / total) * 100)}px`, minWidth: 58, cursor: "grab", borderRadius: 6, border: `2px solid ${active ? C.oak : C.line}`, background: active ? "rgba(176,121,74,.14)" : C.paper, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3, padding: "10px 4px", boxShadow: active ? "0 5px 14px -7px rgba(176,121,74,.7)" : "none" }}>
+              <span style={{ fontSize: 22, lineHeight: 1, color: C.walnutDark }}>{k.icon}</span>
+              <span style={{ fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 11, color: active ? C.walnutDark : C.muted, fontWeight: active ? 700 : 500, textAlign: "center", lineHeight: 1.2 }}>{k.l[lang]}</span>
+              <span style={{ fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 10, color: C.muted }}>{u.w}{tt("cm", "سم")}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* add a cabinet */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+        {UNIT_KINDS.map((k) => (
+          <button key={k.id} onClick={() => uctl.add(k.id)}
+            style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7, fontFamily: "'Hanken Grotesk',sans-serif", fontWeight: 600, fontSize: 13, padding: "9px 13px", borderRadius: 999, border: `1.5px solid ${C.line}`, background: C.paper, color: C.walnut }}>
+            <Plus size={14} /> <span style={{ fontSize: 15 }}>{k.icon}</span> {k.l[lang]}
+          </button>
+        ))}
+      </div>
+
+      {/* selected-unit editor */}
+      {sel && (
+        <div style={{ marginTop: 14, border: `1.5px solid ${C.oak}`, borderRadius: 8, padding: "16px 18px", background: "rgba(176,121,74,.06)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <span style={{ fontFamily: "'Fraunces',serif", fontSize: 18, color: C.walnutDark }}>{tt("Selected cabinet", "الخزانة المختارة")}</span>
+            <button onClick={() => uctl.remove(sel.id)} style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, color: "#A23B2E", background: "none", border: "none", fontFamily: "'Hanken Grotesk',sans-serif", fontWeight: 600, fontSize: 13 }}>
+              <Trash2 size={15} /> {tt("Remove", "حذف")}
+            </button>
+          </div>
+          <Pills lang={lang} value={sel.kind} onChange={(v) => uctl.update(sel.id, { kind: v, w: unitKind(v).def })} items={UNIT_KINDS} />
+          <Range label={tt("Width", "العرض")} value={sel.w} min={unitKind(sel.kind).min} max={unitKind(sel.kind).max} unit={tt("cm", "سم")} onChange={(v) => uctl.update(sel.id, { w: v })} />
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <button onClick={() => uctl.reorder(sel.id, -1)} style={miniBtn}>← {tt("Move", "تحريك")}</button>
+            <button onClick={() => uctl.reorder(sel.id, 1)} style={miniBtn}>{tt("Move", "تحريك")} →</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ===================== APP ===================== */
 export default function App() {
   const [lang, setLang] = useState("ar");
@@ -552,11 +681,24 @@ export default function App() {
     if (typeof window !== "undefined") window.localStorage.setItem("hewn-lang", lang);
   }, [lang]);
 
+  const [expanded, setExpanded] = useState(false);
   const dir = lang === "ar" ? "rtl" : "ltr";
   const t = (key) => STR[key][lang];
   const set = (k) => (v) => setCfg((c) => ({ ...c, [k]: v }));
   const isK = cfg.product === "kitchen";
   const price = priceRange(cfg);
+
+  // modular cabinet controller (shared by the list, the 2D lane and the 3D scene)
+  const uctl = {
+    units: cfg.kUnits || [],
+    selected: cfg.selectedUnit,
+    select: (id) => setCfg((c) => ({ ...c, selectedUnit: c.selectedUnit === id ? null : id })),
+    add: (kind) => setCfg((c) => ({ ...c, kUnits: [...(c.kUnits || []), makeUnit(kind)], selectedUnit: null })),
+    remove: (id) => setCfg((c) => ({ ...c, kUnits: (c.kUnits || []).filter((x) => x.id !== id), selectedUnit: c.selectedUnit === id ? null : c.selectedUnit })),
+    update: (id, patch) => setCfg((c) => ({ ...c, kUnits: (c.kUnits || []).map((x) => (x.id === id ? { ...x, ...patch } : x)) })),
+    move: (from, to) => setCfg((c) => { const u = [...(c.kUnits || [])]; if (from < 0 || to < 0 || from >= u.length || to >= u.length) return c; const [m] = u.splice(from, 1); u.splice(to, 0, m); return { ...c, kUnits: u }; }),
+    reorder: (id, dir2) => setCfg((c) => { const u = [...(c.kUnits || [])]; const i = u.findIndex((x) => x.id === id); const j = i + dir2; if (i < 0 || j < 0 || j >= u.length) return c; [u[i], u[j]] = [u[j], u[i]]; return { ...c, kUnits: u }; }),
+  };
 
   const totalSteps = STR.steps.length;
   const goNext = () => {
@@ -604,7 +746,7 @@ export default function App() {
         <div style={{ flex: "1 1 54%", minWidth: 0 }} className="cfg-controls">
           <div style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: 6, padding: "clamp(22px,3.5vw,36px)" }}>
             {step === 0 && <StepProduct cfg={cfg} set={set} t={t} lang={lang} />}
-            {step === 1 && <StepDimensions cfg={cfg} set={set} t={t} lang={lang} isK={isK} />}
+            {step === 1 && <StepDimensions cfg={cfg} set={set} t={t} lang={lang} isK={isK} uctl={uctl} />}
             {step === 2 && <StepMaterials cfg={cfg} set={set} t={t} lang={lang} isK={isK} />}
             {step === 3 && <StepStorage cfg={cfg} set={set} t={t} lang={lang} isK={isK} />}
             {step === 4 && <StepReview cfg={cfg} t={t} lang={lang} isK={isK} price={price} snapshot={snapshot} />}
@@ -624,13 +766,37 @@ export default function App() {
         {/* PREVIEW + SUMMARY */}
         <div style={{ flex: "1 1 46%", minWidth: 0 }} className="cfg-preview">
           <div className="cfg-sticky">
-            <div className="cfg-stage" style={{ aspectRatio: "4 / 3.6", border: `1px solid ${C.line}`, borderRadius: 6, overflow: "hidden", marginBottom: 16, boxShadow: "0 20px 50px -34px rgba(62,44,30,.55)" }}>
-              <Preview3D config={cfg} lang={lang} snapRef={snapRef} />
+            <div className="cfg-stage" style={{ position: "relative", aspectRatio: "4 / 3.6", border: `1px solid ${C.line}`, borderRadius: 6, overflow: "hidden", marginBottom: 16, boxShadow: "0 20px 50px -34px rgba(62,44,30,.55)" }}>
+              <Preview3D config={cfg} lang={lang} snapRef={snapRef} onPickUnit={uctl.select} onReorder={uctl.reorder} />
+              <button onClick={() => setExpanded(true)} title={lang === "ar" ? "تكبير" : "Expand"}
+                style={{ position: "absolute", top: 10, insetInlineEnd: 10, zIndex: 5, display: "inline-flex", alignItems: "center", gap: 7, background: "rgba(36,31,27,.78)", color: "#fff", border: "none", borderRadius: 999, padding: "8px 13px", cursor: "pointer", fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 12.5, fontWeight: 600 }}>
+                <Maximize2 size={14} /> {lang === "ar" ? "تكبير" : "Expand"}
+              </button>
             </div>
             <SummaryPanel cfg={cfg} t={t} lang={lang} isK={isK} price={price} />
           </div>
         </div>
       </div>
+
+      {expanded && (
+        <div onClick={(e) => { if (e.target === e.currentTarget) setExpanded(false); }}
+          style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(24,20,17,.82)", display: "flex", flexDirection: "column", padding: "clamp(10px,2vw,28px)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <span style={{ fontFamily: "'Fraunces',serif", fontSize: 20, color: "#fff" }}>{isK ? t("kitchen") : t("desk")}</span>
+            <button onClick={() => setExpanded(false)} style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "#fff", color: C.charcoal, border: "none", borderRadius: 999, padding: "9px 16px", cursor: "pointer", fontFamily: "'Hanken Grotesk',sans-serif", fontWeight: 700, fontSize: 14 }}>
+              <X size={16} /> {lang === "ar" ? "إغلاق" : "Close"}
+            </button>
+          </div>
+          <div style={{ flex: 1, minHeight: 0, borderRadius: 10, overflow: "hidden", background: "#EFE7D9" }}>
+            <Preview3D config={cfg} lang={lang} onPickUnit={uctl.select} onReorder={uctl.reorder} />
+          </div>
+          {isK && (
+            <div style={{ marginTop: 12, background: C.paper, borderRadius: 10, padding: "14px 16px", maxHeight: "34vh", overflowY: "auto" }}>
+              <UnitBuilder cfg={cfg} lang={lang} uctl={uctl} />
+            </div>
+          )}
+        </div>
+      )}
     </Shell>
   );
 }
@@ -648,7 +814,7 @@ function StepProduct({ cfg, set, t, lang }) {
   );
 }
 
-function StepDimensions({ cfg, set, t, lang, isK }) {
+function StepDimensions({ cfg, set, t, lang, isK, uctl }) {
   return (
     <div>
       <SectionTitle lang={lang}>{t("dims")}</SectionTitle>
@@ -659,8 +825,8 @@ function StepDimensions({ cfg, set, t, lang, isK }) {
           <Range label={t("depth")} value={cfg.kD} min={55} max={70} unit={t("cm")} onChange={set("kD")} />
           <FieldLabel>{t("layout")}</FieldLabel>
           <Pills lang={lang} value={cfg.kLayout} onChange={set("kLayout")} items={[{ id: "straight", l: L("Straight", "مستقيم") }, { id: "l", l: L("L-shape", "حرف L") }, { id: "u", l: L("U-shape", "حرف U") }]} />
+          <UnitBuilder cfg={cfg} lang={lang} uctl={uctl} />
           <div style={{ marginTop: 18 }}>
-            <Counter label={t("lowerCab")} value={cfg.kLower} min={1} max={10} onChange={set("kLower")} />
             <Counter label={t("upperCab")} value={cfg.kUpper} min={0} max={10} onChange={set("kUpper")} />
           </div>
           <div style={{ display: "grid", gap: 12, marginTop: 18 }}>
@@ -731,9 +897,9 @@ function StepMaterials({ cfg, set, t, lang, isK }) {
 
 function StepStorage({ cfg, set, t, lang, isK }) {
   const kItems = [
-    ["corner", L("Corner unit", "وحدة ركنية")], ["oven", L("Built-in oven space", "مساحة فرن")],
     ["fridge", L("Fridge space", "مساحة ثلاجة")], ["microwave", L("Microwave unit", "وحدة ميكروويف")],
-    ["openShelf", L("Open shelves", "أرفف مفتوحة")], ["pantry", L("Pantry unit", "وحدة مؤن")],
+    ["openShelf", L("Wall open shelves", "أرفف حائط مفتوحة")], ["pantry", L("Pantry unit", "وحدة مؤن")],
+    ["corner", L("Corner unit", "وحدة ركنية")],
   ];
   const dItems = [
     ["closed", L("Closed storage", "تخزين مغلق")], ["cpu", L("CPU space", "مساحة كمبيوتر")],
@@ -745,11 +911,9 @@ function StepStorage({ cfg, set, t, lang, isK }) {
     <div>
       <SectionTitle sub={t("storageSub")} lang={lang}>{t("storageTitle")}</SectionTitle>
       {isK && (
-        <>
-          <FieldLabel>{L("Sink position", "موضع الحوض")[lang]}</FieldLabel>
-          <Pills lang={lang} value={cfg.sink} onChange={set("sink")} items={[{ id: "left", l: L("Left", "يسار") }, { id: "center", l: L("Center", "وسط") }, { id: "right", l: L("Right", "يمين") }]} />
-          <div style={{ height: 8 }} />
-        </>
+        <p style={{ fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 13.5, color: C.muted, marginBottom: 14, lineHeight: 1.5 }}>
+          {L("Sink, oven, drawers and dishwashers are placed as cabinets in the Dimensions step.", "الحوض والفرن والأدراج وغسالة الأطباق بتتحط كخزائن في خطوة الأبعاد.")[lang]}
+        </p>
       )}
       <div className="grid sm:grid-cols-2" style={{ gap: 12, marginTop: 10 }}>
         {items.map(([k, lbl]) => <Toggle key={k} label={lbl[lang]} value={cfg[k]} onChange={set(k)} />)}
@@ -770,7 +934,7 @@ function rowsFor(cfg, lang, isK, t) {
   ];
   if (isK) {
     base.push([STR.layout[lang], { straight: "Straight", l: "L-shape", u: "U-shape" }[cfg.kLayout]]);
-    base.push([STR.lowerCab[lang] + " / " + STR.upperCab[lang], `${cfg.kLower} / ${cfg.kUpper}`]);
+    base.push([STR.lowerCab[lang] + " / " + STR.upperCab[lang], `${(cfg.kUnits || []).length} / ${cfg.kUpper}`]);
     base.push([STR.countertop[lang], COUNTERS.find((x) => x.id === cfg.counter).l[lang]]);
   } else {
     base.push([STR.deskShape[lang], { straight: "Straight", l: "L-shape", exec: "Executive" }[cfg.dShape]]);
@@ -781,9 +945,16 @@ function rowsFor(cfg, lang, isK, t) {
 }
 function featureList(cfg, lang, isK) {
   const map = isK
-    ? { kTall: L("Tall unit", "وحدة طويلة"), kIsland: L("Island", "جزيرة"), corner: L("Corner unit", "ركنية"), oven: L("Oven", "فرن"), fridge: L("Fridge", "ثلاجة"), microwave: L("Microwave", "ميكروويف"), openShelf: L("Open shelves", "أرفف"), pantry: L("Pantry", "مؤن"), led: L("LED lighting", "إضاءة LED") }
+    ? { kTall: L("Tall unit", "وحدة طويلة"), kIsland: L("Island", "جزيرة"), corner: L("Corner unit", "ركنية"), fridge: L("Fridge", "ثلاجة"), microwave: L("Microwave", "ميكروويف"), openShelf: L("Open shelves", "أرفف"), pantry: L("Pantry", "مؤن"), led: L("LED lighting", "إضاءة LED") }
     : { dSide: L("Side unit", "جانبية"), dCable: L("Cable mgmt", "كابلات"), dMonitor: L("Monitor shelf", "رف شاشة"), dKeyboard: L("Keyboard tray", "درج كيبورد"), closed: L("Closed storage", "مغلق"), cpu: L("CPU space", "كمبيوتر"), printer: L("Printer shelf", "طابعة"), fileCab: L("File cabinet", "ملفات") };
-  return Object.keys(map).filter((k) => cfg[k]).map((k) => map[k][lang]);
+  const feats = Object.keys(map).filter((k) => cfg[k]).map((k) => map[k][lang]);
+  if (isK) {
+    const kinds = new Set((cfg.kUnits || []).map((u) => u.kind));
+    if (kinds.has("oven")) feats.unshift(L("Oven + hob", "فرن + بوتاجاز")[lang]);
+    if (kinds.has("sink")) feats.unshift(L("Sink", "حوض")[lang]);
+    if (kinds.has("dishwasher")) feats.push(L("Dishwasher", "غسالة أطباق")[lang]);
+  }
+  return feats;
 }
 
 function StepReview({ cfg, t, lang, isK, price, snapshot }) {
@@ -861,7 +1032,7 @@ function SummaryPanel({ cfg, t, lang, isK, price }) {
         <span style={{ fontFamily: "'Fraunces',serif", fontSize: 19, color: C.walnutDark }}>{isK ? t("kitchen") : t("desk")}</span>
       </div>
       <div style={{ fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 14, color: C.muted, lineHeight: 1.7, marginBottom: 12 }}>
-        {isK ? `${cfg.kW}×${cfg.kH}×${cfg.kD} ${t("cm")} · ${cfg.kLower}+${cfg.kUpper}` : `${cfg.dW}×${cfg.dD}×${cfg.dH} ${t("cm")} · ${cfg.dDrawers}${L(" drawers", " أدراج")[lang]}`}
+        {isK ? `${cfg.kW}×${cfg.kH}×${cfg.kD} ${t("cm")} · ${(cfg.kUnits || []).length}+${cfg.kUpper}` : `${cfg.dW}×${cfg.dD}×${cfg.dH} ${t("cm")} · ${cfg.dDrawers}${L(" drawers", " أدراج")[lang]}`}
       </div>
       {feats.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
