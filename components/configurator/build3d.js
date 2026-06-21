@@ -283,14 +283,15 @@ function addCarcass(ug, w, D, bodyH, baseY, col, o) {
   put(ug, box(w - 2 * t, t, 0.09, col, o), 0, baseY + bodyH - t / 2, D - 0.05);   // top back rail
 }
 function addBaseUnit(ug, o) {
-  const { kind, w, D, bodyH, baseY, topY, woodC, gloss, handle, lowerStyle, counterC, stone } = o;
+  const { kind, w, D, bodyH, baseY, topY, woodC, gloss, handle, lowerStyle, counterC, stone, shelves, drawers } = o;
   addCarcass(ug, w, D, bodyH, baseY, woodC, { gloss });
   const fz = D;
   if (kind === "drawers") {
-    const n = bodyH > 0.7 ? 4 : 3, fh = (bodyH - 0.02) / n;
+    const n = Math.max(1, Math.min(6, drawers || (bodyH > 0.7 ? 4 : 3))), fh = (bodyH - 0.02) / n;
     for (let i = 0; i < n; i++) addDoor(ug, w - 0.01, fh - 0.012, 0, baseY + 0.01 + fh / 2 + i * fh, fz, woodC, { gloss }, handle, false, lowerStyle);
   } else if (kind === "open") {
-    for (let i = 1; i <= 2; i++) put(ug, box(w - 0.045, 0.02, D - 0.05, woodC, { gloss }), 0, baseY + (bodyH / 3) * i, D / 2);
+    const n = Math.max(1, Math.min(5, shelves || 2));
+    for (let i = 1; i <= n; i++) put(ug, box(w - 0.045, 0.02, D - 0.05, woodC, { gloss }), 0, baseY + (bodyH / (n + 1)) * i, D / 2);
   } else if (kind === "sink") {
     const half = (w - 0.01) / 2;
     addDoor(ug, half, bodyH, -half / 2, baseY + bodyH / 2, fz, woodC, { gloss }, handle, true, lowerStyle);
@@ -315,28 +316,38 @@ function addBaseUnit(ug, o) {
   }
 }
 
-/* ---------------- cabinet run (modular base units + worktop + uppers) ---------------- */
+/* ---------------- room shell (floor + corner walls) ---------------- */
+function buildRoom(parent, RW, RL, RH) {
+  const g = new THREE.Group();
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(RW + 1.2, RL + 1.2), pbr("#E6DDCD", { floor: true }));
+  floor.rotation.x = -Math.PI / 2; floor.position.set(RW / 2, -0.003, RL / 2); floor.receiveShadow = true; g.add(floor);
+  const wallMat = pbr("#EFE9DF", { wall: true });
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(RW, RH), wallMat);
+  back.position.set(RW / 2, RH / 2, -0.01); back.receiveShadow = true; g.add(back);
+  const left = new THREE.Mesh(new THREE.PlaneGeometry(RL, RH), wallMat);
+  left.rotation.y = Math.PI / 2; left.position.set(-0.01, RH / 2, RL / 2); left.receiveShadow = true; g.add(left);
+  parent.add(g);
+  return g;
+}
+
+/* ---------------- cabinet run (absolute widths, laid from the corner) ---------------- */
 function addCabinetRun(parent, o) {
   const g = new THREE.Group();
-  const { length: W, depth: D, units, nUpper, woodC, counterC, splashC, gloss, handle, stone, skipUpperAt, doorStyle = "shaker", led, selectedId } = o;
+  const { depth: D, units, nUpper, woodC, counterC, splashC, gloss, handle, stone, skipUpperAt, doorStyle = "shaker", led, selectedId } = o;
   const lowerStyle = doorStyle === "glass" ? "shaker" : doorStyle;
-  const KICK = 0.1, H = 0.9, gap = 0.016, topY = H;
+  const KICK = 0.1, H = 0.9, gap = 0.004, topY = H;
   const list = units && units.length ? units : [{ kind: "door", w: 60 }];
-  const sumW = list.reduce((a, u) => a + (u.w || 60), 0);
   const bodyH = H - KICK;
 
-  // continuous plinth (toe kick)
-  put(g, box(W - 0.02, KICK, D - 0.07, "#262320"), 0, KICK / 2, D / 2 - 0.02);
-
-  // base units laid left -> right, each in its own pickable group
-  let cursor = -W / 2;
+  // lay units left -> right at their real widths, starting at the corner (x = 0)
+  let cursor = 0;
   list.forEach((u, i) => {
-    const uw = W * ((u.w || 60) / sumW);
+    const uw = (u.w || 60) / 100;
     const cx = cursor + uw / 2;
     const ug = new THREE.Group();
     ug.position.x = cx;
     ug.userData = { unitId: u.id, unitIndex: i, pickable: true };
-    addBaseUnit(ug, { kind: u.kind, w: uw - gap, D, bodyH, baseY: KICK, topY, woodC, gloss, handle, lowerStyle, counterC, stone });
+    addBaseUnit(ug, { kind: u.kind, w: uw - gap, D, bodyH, baseY: KICK, topY, woodC, gloss, handle, lowerStyle, counterC, stone, shelves: u.shelves, drawers: u.drawers });
     if (selectedId && u.id === selectedId) {
       const eg = new THREE.EdgesGeometry(new THREE.BoxGeometry(uw - gap + 0.02, bodyH + 0.04, D + 0.04));
       const ls = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0xB0794A }));
@@ -346,34 +357,39 @@ function addCabinetRun(parent, o) {
     g.add(ug);
     cursor += uw;
   });
+  const runLen = Math.max(cursor, 0.3);
+
+  // continuous plinth (toe kick)
+  put(g, box(runLen - 0.02, KICK, D - 0.07, "#262320"), runLen / 2, KICK / 2, D / 2 - 0.02);
 
   // worktop with overhang + slim front fascia
   if (counterC) {
-    put(g, box(W + 0.03, 0.04, D + 0.035, counterC, { stone, gloss: !stone }), 0, H + 0.02, D / 2 + 0.005);
-    put(g, box(W + 0.03, 0.018, 0.012, counterC, { stone, gloss: !stone }), 0, H + 0.001, D + 0.022);
+    put(g, box(runLen + 0.02, 0.04, D + 0.035, counterC, { stone, gloss: !stone }), runLen / 2, H + 0.02, D / 2 + 0.005);
+    put(g, box(runLen + 0.02, 0.018, 0.012, counterC, { stone, gloss: !stone }), runLen / 2, H + 0.001, D + 0.022);
   }
   // backsplash
-  if (splashC) put(g, box(W, 0.5, 0.018, splashC, {}), 0, H + 0.04 + 0.25, 0.009);
+  if (splashC) put(g, box(runLen, 0.5, 0.018, splashC, {}), runLen / 2, H + 0.04 + 0.25, 0.009);
 
   // upper carcasses + doors + cornice + LED
   if (nUpper > 0) {
     const Du = 0.34, Hu = 0.72, yb = 1.5;
-    const m = nUpper, segWu = (W - gap * (m - 1)) / m;
+    const m = nUpper, segWu = (runLen - gap * (m - 1)) / m;
     for (let i = 0; i < m; i++) {
       if (skipUpperAt != null && i === skipUpperAt) continue;
-      const x = -W / 2 + segWu / 2 + i * (segWu + gap);
+      const x = segWu / 2 + i * (segWu + gap);
       put(g, box(segWu - 0.006, Hu, Du, woodC, { gloss }), x, yb + Hu / 2, Du / 2);
       addDoor(g, segWu - 0.01, Hu, x, yb + Hu / 2, Du, woodC, { gloss }, handle, true, doorStyle);
     }
-    put(g, box(W, 0.04, Du + 0.03, woodC, { gloss }), 0, yb + Hu + 0.02, Du / 2); // cornice
+    put(g, box(runLen, 0.04, Du + 0.03, woodC, { gloss }), runLen / 2, yb + Hu + 0.02, Du / 2); // cornice
     if (led) {
       const strip = new THREE.Mesh(
-        new THREE.BoxGeometry(W - 0.08, 0.018, 0.05),
+        new THREE.BoxGeometry(runLen - 0.08, 0.018, 0.05),
         new THREE.MeshStandardMaterial({ color: 0xfff3da, emissive: 0xffe6b8, emissiveIntensity: 1.4, roughness: 0.5 })
       );
-      put(g, strip, 0, yb - 0.02, 0.07);
+      put(g, strip, runLen / 2, yb - 0.02, 0.07);
     }
   }
+  g.userData.runLen = runLen;
   parent.add(g);
   return g;
 }
@@ -449,13 +465,12 @@ export function defaultKitchenUnits(n = 5) {
 
 /* ============================ KITCHEN ============================ */
 export function buildKitchen(model, cfg) {
-  const W = cfg.kW / 100, D = cfg.kD / 100;
+  const D = cfg.kD / 100;
   const woodC = WOOD[cfg.wood] || WOOD.oak;
   const counterC = COUNTER[cfg.counter] || COUNTER.quartzw;
   const splashC = cfg.backsplash === "none" ? null : SPLASH[cfg.backsplash];
   const stone = STONE_IDS.includes(cfg.counter);
   const gloss = cfg.gloss;
-  const Lside = Math.min(Math.max(W * 0.55, 1.0), 2.2);
 
   const units = (cfg.kUnits && cfg.kUnits.length) ? cfg.kUnits : defaultKitchenUnits(cfg.kLower || 5);
   const sumW = units.reduce((a, u) => a + (u.w || 60), 0);
@@ -472,60 +487,58 @@ export function buildKitchen(model, cfg) {
     skipUpperAt = Math.max(0, Math.min(cfg.kUpper - 1, Math.round(f * cfg.kUpper - 0.5)));
   }
 
+  // main run laid along the back wall, starting at the corner (x = 0)
   const main = addCabinetRun(model, {
-    length: W, depth: D, units, nUpper: cfg.kUpper, woodC, counterC, splashC,
+    depth: D, units, nUpper: cfg.kUpper, woodC, counterC, splashC,
     gloss, handle: cfg.handle, stone, doorStyle, led, skipUpperAt, selectedId: cfg.selectedUnit,
   });
-  main.position.set(W / 2, 0, 0);
+  const runLen = main.userData.runLen;
+  main.position.set(0, 0, 0);
 
-  const sideUnits = (n) => Array.from({ length: Math.max(1, n) }, (_, k) => ({ id: "s" + k, kind: k === 0 ? "drawers" : "door", w: 60 }));
-  if (cfg.kLayout === "l" || cfg.kLayout === "u") {
-    const sn = Math.max(1, Math.round(units.length / 3)), su = Math.max(0, Math.round(cfg.kUpper / 3));
-    const right = addCabinetRun(model, { length: Lside, depth: D, units: sideUnits(sn), nUpper: su, woodC, counterC, splashC, gloss, handle: cfg.handle, stone, doorStyle, led });
-    right.rotation.y = -Math.PI / 2; right.position.set(W, 0, D + Lside / 2);
+  // the room — wall is at least as long as the run
+  const RW = Math.max((cfg.kW || 360) / 100, runLen);
+  const RL = (cfg.roomL || 320) / 100;
+  const RH = (cfg.kH || 270) / 100;
+  buildRoom(model, RW, RL, RH);
+
+  // appliances / extras anchored to the back wall, to the right of the run
+  let rightX = runLen;
+  if (cfg.kTall || cfg.pantry) {
+    const tallCount = (cfg.kTall ? 1 : 0) + (cfg.pantry ? 1 : 0);
+    for (let i = 0; i < tallCount; i++) {
+      const x = rightX + 0.3;
+      put(model, box(0.6, 2.1, D, woodC, { gloss }), x, 1.05, D / 2);
+      addDoor(model, 0.58, 1.0, x, 1.55, D, woodC, { gloss }, cfg.handle, true, doorStyle);
+      addDoor(model, 0.58, 0.95, x, 0.55, D, woodC, { gloss }, cfg.handle, true, lowerStyle);
+      rightX += 0.6;
+    }
   }
-  if (cfg.kLayout === "u") {
-    const sn = Math.max(1, Math.round(units.length / 3)), su = Math.max(0, Math.round(cfg.kUpper / 3));
-    const left = addCabinetRun(model, { length: Lside, depth: D, units: sideUnits(sn), nUpper: su, woodC, counterC, splashC, gloss, handle: cfg.handle, stone, doorStyle, led });
-    left.rotation.y = Math.PI / 2; left.position.set(0, 0, D + Lside / 2);
-  }
+  if (cfg.fridge) { put(model, makeFridge(gloss), rightX + 0.34, 0, D / 2); rightX += 0.7; }
 
-  if (cfg.microwave) addMicrowave(model, W * 0.86, 1.5, 0.34);
+  if (cfg.microwave) addMicrowave(model, Math.min(runLen * 0.86, runLen - 0.3), 1.5, 0.34);
 
-  // fridge (right of main run)
-  if (cfg.fridge) put(model, makeFridge(gloss), W + 0.34, 0, D / 2);
-
-  // tall unit / pantry (left of main run) — full-height larders with doors
-  const addTall = (x) => {
-    put(model, box(0.6, 2.1, D, woodC, { gloss }), x, 1.05, D / 2);
-    addDoor(model, 0.58, 1.0, x, 1.55, D, woodC, { gloss }, cfg.handle, true, doorStyle);
-    addDoor(model, 0.58, 0.95, x, 0.55, D, woodC, { gloss }, cfg.handle, true, lowerStyle);
-  };
-  if (cfg.kTall) addTall(-0.34);
-  if (cfg.pantry) addTall(cfg.kTall ? -1.0 : -0.34);
-
-  // wall open shelves
+  // wall open shelves above the run
   if (cfg.openShelf) {
-    put(model, box(0.85, 0.04, 0.26, woodC, { gloss }), W * 0.28, 1.78, 0.13);
-    put(model, box(0.85, 0.04, 0.26, woodC, { gloss }), W * 0.28, 2.05, 0.13);
+    put(model, box(0.85, 0.04, 0.26, woodC, { gloss }), runLen * 0.3, 1.78, 0.13);
+    put(model, box(0.85, 0.04, 0.26, woodC, { gloss }), runLen * 0.3, 2.05, 0.13);
   }
 
   // island with a waterfall worktop + seating overhang
   if (cfg.kIsland) {
-    const iw = Math.min(W * 0.55, 1.7), id = 0.95;
-    const zc = D + (cfg.kLayout === "straight" ? 1.4 : Lside * 0.62);
+    const iw = Math.min(runLen * 0.6, 1.7), id = 0.95;
     const ig = new THREE.Group();
     put(ig, box(iw, 0.9, id - 0.25, woodC, { gloss }), 0, 0.45, -0.05);
     addDoor(ig, iw * 0.45, 0.8, -iw * 0.24, 0.46, id - 0.25, woodC, { gloss }, cfg.handle, true, lowerStyle);
     addDoor(ig, iw * 0.45, 0.8, iw * 0.24, 0.46, id - 0.25, woodC, { gloss }, cfg.handle, true, lowerStyle);
-    // worktop with overhang one side
     put(ig, box(iw + 0.05, 0.05, id, counterC, { stone, gloss: !stone }), 0, 0.925, 0.02);
-    // waterfall ends
-    put(ig, box(0.05, 0.92, id - 0.24, counterC, { stone, gloss: !stone }), -iw / 2 - 0.0, 0.46, -0.04);
-    put(ig, box(0.05, 0.92, id - 0.24, counterC, { stone, gloss: !stone }), iw / 2 + 0.0, 0.46, -0.04);
-    ig.position.set(W / 2, 0, zc);
+    put(ig, box(0.05, 0.92, id - 0.24, counterC, { stone, gloss: !stone }), -iw / 2, 0.46, -0.04);
+    put(ig, box(0.05, 0.92, id - 0.24, counterC, { stone, gloss: !stone }), iw / 2, 0.46, -0.04);
+    ig.position.set(runLen / 2, 0, Math.min(D + 1.4, RL - 0.7));
     model.add(ig);
   }
+
+  // camera focus = centre of the room
+  model.userData.focus = { cx: RW / 2, cy: RH * 0.45, cz: RL * 0.5, radius: Math.max(RW, RL, RH) * 1.15 + 0.5 };
 }
 
 /* ============================ DESK ============================ */
@@ -655,6 +668,18 @@ export function buildDesk(model, cfg) {
     put(model, ring, W * 0.3, H - topT + 0.001, -(D / 2) + 0.14);
     put(model, cyl(0.03, 0.02, "#141312", {}, 16), W * 0.3, H - topT - 0.01, -(D / 2) + 0.14);
   }
+
+  // room around the desk (floor + back wall), centred on the desk
+  const RW = Math.max(W + 2.0, 3.0), RL = Math.max(D + 2.0, 2.6), RH = Math.max(H + 1.6, 2.5);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(RW + 1, RL + 1), pbr("#E6DDCD"));
+  floor.rotation.x = -Math.PI / 2; floor.position.set(0, -0.002, 0); floor.receiveShadow = true; model.add(floor);
+  const wallMat = pbr("#EFE9DF");
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(RW, RH), wallMat);
+  back.position.set(0, RH / 2, -(D / 2) - 0.25); back.receiveShadow = true; model.add(back);
+  const side = new THREE.Mesh(new THREE.PlaneGeometry(RL, RH), wallMat);
+  side.rotation.y = Math.PI / 2; side.position.set(-(RW / 2), RH / 2, 0); side.receiveShadow = true; model.add(side);
+
+  model.userData.focus = { cx: 0, cy: H * 0.7, cz: 0, radius: Math.max(W, D, H) * 1.9 + 1.0 };
 }
 
 /* ---------------- disposal ---------------- */
