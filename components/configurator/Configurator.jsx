@@ -463,6 +463,20 @@ function Preview3D({ config, lang, snapRef, onPickUnit, onReorder }) {
     s.scene.add(model);
     s.model = model;
 
+    // room backdrop (floor + corner walls), sized to the model and excluded from framing
+    if (s.room) { s.scene.remove(s.room); disposeGroup(s.room); }
+    const room = new THREE.Group();
+    const wallH = Math.max(size.y + 0.35, 2.5);
+    const fW = size.x + 2.4, fD = size.z + 2.4;
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(fW + 6, fD + 6), new THREE.MeshStandardMaterial({ color: 0xE6DDCD, roughness: 0.96, metalness: 0 }));
+    floor.rotation.x = -Math.PI / 2; floor.position.y = -0.004; floor.receiveShadow = true; room.add(floor);
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0xF1ECE3, roughness: 1, metalness: 0 });
+    const backWall = new THREE.Mesh(new THREE.PlaneGeometry(fW, wallH), wallMat);
+    backWall.position.set(0, wallH / 2, -size.z / 2 - 0.06); backWall.receiveShadow = true; room.add(backWall);
+    const sideWall = new THREE.Mesh(new THREE.PlaneGeometry(fD, wallH), wallMat);
+    sideWall.rotation.y = Math.PI / 2; sideWall.position.set(-size.x / 2 - 0.06, wallH / 2, 0); sideWall.receiveShadow = true; room.add(sideWall);
+    s.scene.add(room); s.room = room;
+
     const maxDim = Math.max(size.x, size.y, size.z);
     // keep the user's orbit on material/dimension tweaks; only re-frame
     // when switching product or when the model no longer fits the view.
@@ -593,6 +607,21 @@ function FieldLabel({ children }) {
 const inputStyle = { width: "100%", fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 15.5, color: C.ink, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 3, padding: "13px 15px", outline: "none", boxSizing: "border-box" };
 
 /* ===================== MODULAR CABINET BUILDER ===================== */
+/* little catalogue thumbnail drawn per cabinet type */
+function UnitThumb({ kind }) {
+  const wood = "#C49A6C", ln = "#8A6A45", dk = "#2A2724", steel = "#CFD3D4", glass = "#23303A";
+  const body = <rect x="2.5" y="2.5" width="45" height="51" rx="3.5" fill={wood} stroke={ln} strokeWidth="1.4" />;
+  const parts = {
+    door: (<>{body}<line x1="25" y1="6" x2="25" y2="50" stroke={ln} strokeWidth="1.1" /><circle cx="22" cy="28" r="1.5" fill={dk} /><circle cx="28" cy="28" r="1.5" fill={dk} /></>),
+    drawers: (<>{body}{[14, 26, 38].map((y) => (<g key={y}><rect x="6" y={y - 5} width="38" height="9" rx="1.5" fill="none" stroke={ln} strokeWidth="1" /><rect x="20" y={y - 1.5} width="10" height="2" rx="1" fill={dk} /></g>))}</>),
+    open: (<>{body}<rect x="6" y="6" width="38" height="43" fill="#EFE6D6" /><line x1="6" y1="22" x2="44" y2="22" stroke={ln} strokeWidth="1.4" /><line x1="6" y1="36" x2="44" y2="36" stroke={ln} strokeWidth="1.4" /></>),
+    sink: (<>{body}<ellipse cx="25" cy="15" rx="13" ry="6" fill={steel} stroke={ln} strokeWidth="1" /><path d="M25 9 v-3 h4" fill="none" stroke={dk} strokeWidth="1.4" /><line x1="25" y1="27" x2="25" y2="50" stroke={ln} strokeWidth="1" /></>),
+    oven: (<>{body}<rect x="10" y="5" width="30" height="4" rx="1" fill={dk} /><rect x="7" y="11" width="36" height="23" rx="2" fill={glass} stroke={dk} strokeWidth="1" /><rect x="14" y="37" width="22" height="11" rx="1.5" fill="none" stroke={ln} strokeWidth="1" /></>),
+    dishwasher: (<>{body}<rect x="8" y="5" width="34" height="4" rx="1" fill={dk} /><rect x="6" y="11" width="38" height="38" rx="2" fill="none" stroke={ln} strokeWidth="1" /><circle cx="12" cy="7" r="1" fill="#9AAE9A" /></>),
+  };
+  return <svg viewBox="0 0 50 56" width="100%" height="44" style={{ display: "block" }}>{parts[kind] || parts.door}</svg>;
+}
+
 function UnitBuilder({ cfg, lang, uctl }) {
   const tt = (en, ar) => (lang === "ar" ? ar : en);
   const units = cfg.kUnits || [];
@@ -628,13 +657,20 @@ function UnitBuilder({ cfg, lang, uctl }) {
         })}
       </div>
 
-      {/* add a cabinet */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+      {/* catalogue: pick a cabinet to add */}
+      <div style={{ fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 12, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: C.oakDeep, margin: "18px 0 10px" }}>
+        {tt("Cabinet catalogue", "كتالوج الخزائن")}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))", gap: 10 }}>
         {UNIT_KINDS.map((k) => (
-          <button key={k.id} onClick={() => uctl.add(k.id)}
-            style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7, fontFamily: "'Hanken Grotesk',sans-serif", fontWeight: 600, fontSize: 13, padding: "9px 13px", borderRadius: 999, border: `1.5px solid ${C.line}`, background: C.paper, color: C.walnut }}>
-            <Plus size={14} /> <span style={{ fontSize: 15 }}>{k.icon}</span> {k.l[lang]}
-          </button>
+          <div key={k.id} style={{ border: `1px solid ${C.line}`, borderRadius: 10, background: C.paper, padding: "10px 10px 11px", display: "flex", flexDirection: "column", alignItems: "center", gap: 7 }}>
+            <div style={{ width: "100%", background: C.cream, borderRadius: 6, padding: "7px 12px" }}><UnitThumb kind={k.id} /></div>
+            <span style={{ fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 12, fontWeight: 600, color: C.walnutDark, textAlign: "center", lineHeight: 1.25, minHeight: 30, display: "flex", alignItems: "center" }}>{k.l[lang]}</span>
+            <button onClick={() => uctl.add(k.id)}
+              style={{ width: "100%", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#2E8B57", color: "#fff", border: "none", borderRadius: 6, padding: "7px 8px", fontFamily: "'Hanken Grotesk',sans-serif", fontWeight: 700, fontSize: 12.5 }}>
+              <Plus size={13} /> {tt("Add", "أضف")}
+            </button>
+          </div>
         ))}
       </div>
 
@@ -743,7 +779,7 @@ export default function App() {
     <Shell lang={lang} setLang={setLang} dir={dir} step={step} totalSteps={totalSteps} onSave={saveDesign}>
       <div style={{ display: "flex", flexDirection: "column-reverse", gap: 26 }} className="cfg-grid">
         {/* CONTROLS */}
-        <div style={{ flex: "1 1 54%", minWidth: 0 }} className="cfg-controls">
+        <div style={{ flex: "1 1 36%", minWidth: 0 }} className="cfg-controls">
           <div style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: 6, padding: "clamp(22px,3.5vw,36px)" }}>
             {step === 0 && <StepProduct cfg={cfg} set={set} t={t} lang={lang} />}
             {step === 1 && <StepDimensions cfg={cfg} set={set} t={t} lang={lang} isK={isK} uctl={uctl} />}
@@ -764,7 +800,7 @@ export default function App() {
         </div>
 
         {/* PREVIEW + SUMMARY */}
-        <div style={{ flex: "1 1 46%", minWidth: 0 }} className="cfg-preview">
+        <div style={{ flex: "1 1 64%", minWidth: 0 }} className="cfg-preview">
           <div className="cfg-sticky">
             <div className="cfg-stage" style={{ position: "relative", aspectRatio: "4 / 3.6", border: `1px solid ${C.line}`, borderRadius: 6, overflow: "hidden", marginBottom: 16, boxShadow: "0 20px 50px -34px rgba(62,44,30,.55)" }}>
               <Preview3D config={cfg} lang={lang} snapRef={snapRef} onPickUnit={uctl.select} onReorder={uctl.reorder} />
@@ -1065,14 +1101,14 @@ function Shell({ children, lang, setLang, dir, step, totalSteps, onSave, hidePro
         @media(min-width:640px){.sm\\:grid-cols-2{grid-template-columns:1fr 1fr}}
         @media(min-width:1024px){
           .cfg-grid{flex-direction:row!important}
-          .cfg-sticky{position:sticky;top:88px}
-          .cfg-stage{aspect-ratio:auto!important;height:calc(100vh - 210px);min-height:480px}
+          .cfg-sticky{position:sticky;top:84px}
+          .cfg-stage{aspect-ratio:auto!important;height:calc(100vh - 116px);min-height:560px}
         }
       `}</style>
 
       {/* top bar */}
       <header style={{ position: "sticky", top: 0, zIndex: 30, background: C.cream, borderBottom: `1px solid ${C.line}` }}>
-        <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 22px", height: 64, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+        <div style={{ maxWidth: 1480, margin: "0 auto", padding: "0 22px", height: 64, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <svg width="26" height="26" viewBox="0 0 30 30" fill="none"><rect x="1" y="1" width="28" height="28" rx="3" stroke={C.walnutDark} strokeWidth="1.5" /><path d="M7 20c3-7 5-10 8-10s5 3 8 10" stroke={C.oak} strokeWidth="1.6" strokeLinecap="round" /></svg>
             <span style={{ fontFamily: "'Fraunces',serif", fontSize: 18, fontWeight: 600, color: C.walnutDark }}>{STR.brand[lang]}</span>
@@ -1084,7 +1120,7 @@ function Shell({ children, lang, setLang, dir, step, totalSteps, onSave, hidePro
           </div>
         </div>
         {!hideProgress && totalSteps && (
-          <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 22px 14px" }}>
+          <div style={{ maxWidth: 1480, margin: "0 auto", padding: "0 22px 14px" }}>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
               {STR.steps.map((s, i) => (
                 <React.Fragment key={i}>
@@ -1100,7 +1136,7 @@ function Shell({ children, lang, setLang, dir, step, totalSteps, onSave, hidePro
         )}
       </header>
 
-      <main style={{ maxWidth: 1180, margin: "0 auto", padding: "26px 22px 70px" }}>{children}</main>
+      <main style={{ maxWidth: 1480, margin: "0 auto", padding: "20px 22px 70px" }}>{children}</main>
 
       <style>{`
         @media(min-width:640px){.sm-inline{display:inline!important}}
