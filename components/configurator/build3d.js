@@ -21,13 +21,212 @@ const STEEL = "#C7CACC";
 const DARKGLASS = "#1A1A1E";
 const HANDLE_DK = "#2A2724";
 
+/* ============================================================== *
+ *  Procedural material textures (drawn once, cached by colour).
+ *  Gives real wood grain ("السمرة"), painted-MDF lacquer, and
+ *  stone veining/speckle so finishes read like Egyptian-market
+ *  MDF, melamine, quartz, granite and marble — not flat plastic.
+ * ============================================================== */
+
+/* which finish a raw hex colour represents (keys are lowercase, no #) */
+const GRAIN_BY_HEX = { c49a6c: "oak", "5c3b22": "walnut", d6c5a6: "ash", "3b2a1e": "espresso", cdb386: "bamboo", b0793f: "butcher" };
+const PAINTED_HEX = new Set(["ece7dd", "34302b", "8c9281", "33414f", "26252a"]);
+const STONE_BY_HEX = { eceae4: "quartz", "2b2b2d": "granite", e7e3db: "marble", "9c988f": "concrete", bdb4a6: "stone" };
+const TILE_HEX = new Set(["dcd3c4"]);
+const hexOf = (c) => new THREE.Color(c).getHexString();
+
+const _hasDoc = typeof document !== "undefined";
+const _texCache = new Map();
+const _canvas = (s) => { const c = document.createElement("canvas"); c.width = c.height = s; return c; };
+const _seedRand = (seed) => { let x = seed >>> 0 || 1; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; };
+const _clamp255 = (v) => (v < 0 ? 0 : v > 255 ? 255 : v) | 0;
+
+function _canvasTex(canvas, srgb) {
+  const t = new THREE.CanvasTexture(canvas);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 8;
+  if (srgb && "sRGBEncoding" in THREE) t.encoding = THREE.sRGBEncoding;
+  t.needsUpdate = true;
+  return t;
+}
+
+/* derive a tangent-space normal map from a height (uses red channel) */
+function _normalFrom(srcCanvas, strength) {
+  const S = srcCanvas.width;
+  const src = srcCanvas.getContext("2d").getImageData(0, 0, S, S).data;
+  const out = _canvas(S), octx = out.getContext("2d"), od = octx.createImageData(S, S);
+  const H = (x, y) => src[(((y + S) % S) * S + ((x + S) % S)) * 4] / 255;
+  let i = 0;
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const dx = (H(x - 1, y) - H(x + 1, y)) * strength;
+      const dy = (H(x, y - 1) - H(x, y + 1)) * strength;
+      const len = Math.hypot(dx, dy, 1) || 1;
+      od.data[i] = _clamp255((dx / len * 0.5 + 0.5) * 255);
+      od.data[i + 1] = _clamp255((dy / len * 0.5 + 0.5) * 255);
+      od.data[i + 2] = _clamp255((1 / len * 0.5 + 0.5) * 255);
+      od.data[i + 3] = 255;
+      i += 4;
+    }
+  }
+  octx.putImageData(od, 0, 0);
+  return out;
+}
+
+/* natural wood: wavy vertical grain + fine fibre noise */
+function woodTextures(hex) {
+  const key = "wood:" + hex;
+  if (_texCache.has(key)) return _texCache.get(key);
+  const S = 512, cc = _canvas(S), ctx = cc.getContext("2d"), hc = _canvas(S), hx = hc.getContext("2d");
+  const base = new THREE.Color("#" + hex);
+  const br = base.r * 255, bg = base.g * 255, bb = base.b * 255;
+  const img = ctx.createImageData(S, S), hd = hx.createImageData(S, S);
+  const rnd = _seedRand(parseInt(hex, 16));
+  let i = 0;
+  for (let y = 0; y < S; y++) {
+    const warp = Math.sin(y * 0.013) * 6 + Math.sin(y * 0.061 + 1.3) * 2.4;
+    for (let x = 0; x < S; x++) {
+      const xx = x + warp;
+      let ring = Math.sin(xx * 0.20 + Math.sin(xx * 0.018) * 3.0); // -1..1
+      ring = (ring + 1) * 0.5;
+      const grain = Math.pow(ring, 1.7);                            // sharpen to thin figure
+      const noise = (rnd() - 0.5) * 0.07;
+      const s = 0.82 + grain * 0.30 + noise;                        // ~0.78..1.16
+      img.data[i] = _clamp255(br * s); img.data[i + 1] = _clamp255(bg * s); img.data[i + 2] = _clamp255(bb * s); img.data[i + 3] = 255;
+      const hv = _clamp255(grain * 255);
+      hd.data[i] = hv; hd.data[i + 1] = hv; hd.data[i + 2] = hv; hd.data[i + 3] = 255;
+      i += 4;
+    }
+  }
+  ctx.putImageData(img, 0, 0); hx.putImageData(hd, 0, 0);
+  const res = { map: _canvasTex(cc, true), normalMap: _canvasTex(_normalFrom(hc, 2.2), false) };
+  _texCache.set(key, res);
+  return res;
+}
+
+/* stone surfaces: quartz / granite / marble / concrete / generic slab */
+function stoneTextures(hex, type) {
+  const key = "stone:" + hex;
+  if (_texCache.has(key)) return _texCache.get(key);
+  const S = 512, cc = _canvas(S), ctx = cc.getContext("2d");
+  const rnd = _seedRand(parseInt(hex, 16) ^ 0x9e37);
+  ctx.fillStyle = "#" + hex; ctx.fillRect(0, 0, S, S);
+
+  if (type === "granite") {
+    const cols = ["#1c1c1f", "#3a3a3f", "#6b6b72", "#9a8f86", "#c9c2bb"];
+    for (let n = 0; n < 14000; n++) {
+      ctx.fillStyle = cols[(rnd() * cols.length) | 0];
+      ctx.globalAlpha = 0.35 + rnd() * 0.5;
+      const r = 0.6 + rnd() * 2.2;
+      ctx.beginPath(); ctx.arc(rnd() * S, rnd() * S, r, 0, 6.283); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  } else if (type === "quartz") {
+    for (let n = 0; n < 5000; n++) {
+      const g = 150 + (rnd() * 90) | 0;
+      ctx.fillStyle = `rgba(${g},${g},${g - 8},${0.12 + rnd() * 0.18})`;
+      ctx.beginPath(); ctx.arc(rnd() * S, rnd() * S, 0.5 + rnd() * 1.1, 0, 6.283); ctx.fill();
+    }
+  } else if (type === "concrete") {
+    for (let n = 0; n < 60; n++) {
+      const x = rnd() * S, y = rnd() * S, r = 40 + rnd() * 130;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      const d = rnd() > 0.5 ? 1 : -1, a = 0.05 + rnd() * 0.06;
+      g.addColorStop(0, `rgba(${d > 0 ? 255 : 0},${d > 0 ? 255 : 0},${d > 0 ? 255 : 0},${a})`);
+      g.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 6.283); ctx.fill();
+    }
+    for (let n = 0; n < 1200; n++) { ctx.fillStyle = `rgba(40,40,40,${rnd() * 0.18})`; ctx.beginPath(); ctx.arc(rnd() * S, rnd() * S, rnd() * 0.9, 0, 6.283); ctx.fill(); }
+  } else {
+    // marble / generic slab: soft flowing veins
+    const veinC = type === "stone" ? "rgba(120,110,96," : "rgba(150,150,158,";
+    for (let v = 0; v < 9; v++) {
+      ctx.strokeStyle = veinC + (0.10 + rnd() * 0.22) + ")";
+      ctx.lineWidth = 0.6 + rnd() * 2.4;
+      ctx.beginPath();
+      let x = rnd() * S, y = -10;
+      ctx.moveTo(x, y);
+      while (y < S + 10) { x += (rnd() - 0.5) * 60; y += 18 + rnd() * 26; ctx.quadraticCurveTo(x + (rnd() - 0.5) * 40, y - 12, x, y); }
+      ctx.stroke();
+    }
+    for (let n = 0; n < 2500; n++) { const g = (rnd() * 255) | 0; ctx.fillStyle = `rgba(${g},${g},${g},${rnd() * 0.05})`; ctx.fillRect(rnd() * S, rnd() * S, 1, 1); }
+  }
+
+  const strength = type === "granite" ? 1.6 : type === "concrete" ? 1.5 : type === "quartz" ? 0.5 : 0.9;
+  const res = { map: _canvasTex(cc, true), normalMap: _canvasTex(_normalFrom(cc, strength), false) };
+  _texCache.set(key, res);
+  return res;
+}
+
+/* ceramic backsplash tile with grout lines */
+function tileTextures(hex) {
+  const key = "tile:" + hex;
+  if (_texCache.has(key)) return _texCache.get(key);
+  const S = 512, n = 4, cell = S / n, cc = _canvas(S), ctx = cc.getContext("2d");
+  const rnd = _seedRand(parseInt(hex, 16) ^ 0x55);
+  ctx.fillStyle = "#9b8f7c"; ctx.fillRect(0, 0, S, S); // grout
+  const base = new THREE.Color("#" + hex);
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+    const sh = 0.93 + rnd() * 0.12;
+    ctx.fillStyle = `rgb(${_clamp255(base.r * 255 * sh)},${_clamp255(base.g * 255 * sh)},${_clamp255(base.b * 255 * sh)})`;
+    ctx.fillRect(c * cell + 3, r * cell + 3, cell - 6, cell - 6);
+  }
+  const res = { map: _canvasTex(cc, true), normalMap: _canvasTex(_normalFrom(cc, 3.0), false) };
+  _texCache.set(key, res);
+  return res;
+}
+
 /* ---------------- material + primitive helpers ---------------- */
 function pbr(color, o = {}) {
-  if (o.glass) return new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.1, metalness: 0.2 });
-  if (o.metal) return new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: o.rough ?? 0.34, metalness: 0.92 });
-  if (o.stone) return new THREE.MeshPhysicalMaterial({ color: new THREE.Color(color), roughness: 0.28, metalness: 0.02, clearcoat: 0.5, clearcoatRoughness: 0.3 });
-  if (o.gloss) return new THREE.MeshPhysicalMaterial({ color: new THREE.Color(color), roughness: 0.36, metalness: 0.0, clearcoat: 0.72, clearcoatRoughness: 0.16 });
-  return new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.82, metalness: 0.04 });
+  const col = new THREE.Color(color);
+  if (o.glass) return new THREE.MeshStandardMaterial({ color: col, roughness: 0.08, metalness: 0.25, envMapIntensity: 1.0 });
+  if (o.metal) return new THREE.MeshStandardMaterial({ color: col, roughness: o.rough ?? 0.32, metalness: 0.95, envMapIntensity: 1.15 });
+
+  const hx = hexOf(color);
+
+  // stone worktops / slabs
+  const stoneType = o.stone ? (STONE_BY_HEX[hx] || "quartz") : STONE_BY_HEX[hx];
+  if (stoneType) {
+    const m = new THREE.MeshPhysicalMaterial({
+      color: col, metalness: 0.0, envMapIntensity: 1.0,
+      roughness: stoneType === "granite" ? 0.4 : stoneType === "concrete" ? 0.72 : 0.22,
+      clearcoat: stoneType === "concrete" ? 0.0 : 0.6, clearcoatRoughness: 0.25,
+    });
+    if (_hasDoc) { const t = stoneTextures(hx, stoneType); m.map = t.map; m.normalMap = t.normalMap; m.normalScale = new THREE.Vector2(0.4, 0.4); }
+    return m;
+  }
+
+  // ceramic tile backsplash
+  if (TILE_HEX.has(hx)) {
+    const m = new THREE.MeshStandardMaterial({ color: col, roughness: 0.45, metalness: 0.0, envMapIntensity: 0.8 });
+    if (_hasDoc) { const t = tileTextures(hx); m.map = t.map; m.normalMap = t.normalMap; m.normalScale = new THREE.Vector2(0.6, 0.6); }
+    return m;
+  }
+
+  // natural wood (oak / walnut / ash / espresso / bamboo / butcher block)
+  const grain = GRAIN_BY_HEX[hx];
+  if (grain) {
+    const gl = o.gloss;
+    const m = new THREE.MeshPhysicalMaterial({
+      color: col, metalness: 0.0, envMapIntensity: gl ? 1.0 : 0.7,
+      roughness: gl ? 0.3 : 0.62, clearcoat: gl ? 0.9 : 0.12, clearcoatRoughness: gl ? 0.1 : 0.5,
+    });
+    if (_hasDoc) { const t = woodTextures(hx); m.map = t.map; m.normalMap = t.normalMap; const s = gl ? 0.45 : 0.85; m.normalScale = new THREE.Vector2(s, s); }
+    return m;
+  }
+
+  // painted MDF / laminate (white, charcoal, sage, navy, black laminate)
+  if (PAINTED_HEX.has(hx)) {
+    const gl = o.gloss;
+    return new THREE.MeshPhysicalMaterial({
+      color: col, metalness: 0.0,
+      roughness: gl ? 0.16 : 0.5, clearcoat: gl ? 1.0 : 0.25, clearcoatRoughness: gl ? 0.06 : 0.4,
+      envMapIntensity: gl ? 1.25 : 0.7,
+    });
+  }
+
+  // fallback (toe kicks, neutrals)
+  return new THREE.MeshStandardMaterial({ color: col, roughness: 0.82, metalness: 0.04, envMapIntensity: 0.6 });
 }
 function box(w, h, d, color, o = {}) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), pbr(color, o));
