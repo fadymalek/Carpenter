@@ -252,13 +252,20 @@ function addHandle(parent, style, x, y, frontZ, vertical) {
     : box(0.12, 0.016, 0.02, HANDLE_DK, { metal: true, rough: 0.4 });
   put(parent, bar, x, y, frontZ + 0.014);
 }
-function addDoor(parent, fw, fh, cx, cy, frontZ, color, o, handle, vertical) {
-  // proud frame
-  put(parent, box(fw - 0.018, fh - 0.018, 0.02, color, o), cx, cy, frontZ + 0.011);
-  // recessed shaker centre
-  if (fw > 0.18 && fh > 0.18)
-    put(parent, box(fw - 0.13, fh - 0.13, 0.012, color, o), cx, cy, frontZ + 0.005);
-  // handle near a vertical edge / top
+function addDoor(parent, fw, fh, cx, cy, frontZ, color, o, handle, vertical, style = "shaker") {
+  if (style === "flat" || style === "slab") {
+    // single flat front (handleless modern / slab)
+    put(parent, box(fw - 0.014, fh - 0.014, 0.02, color, o), cx, cy, frontZ + 0.011);
+  } else if (style === "glass" && fw > 0.16 && fh > 0.16) {
+    // framed glass door (display cabinet)
+    put(parent, box(fw - 0.014, fh - 0.014, 0.02, color, o), cx, cy, frontZ + 0.011);
+    put(parent, box(fw - 0.10, fh - 0.10, 0.012, "#2A3438", { glass: true }), cx, cy, frontZ + 0.016);
+  } else {
+    // shaker: proud frame + recessed centre
+    put(parent, box(fw - 0.018, fh - 0.018, 0.02, color, o), cx, cy, frontZ + 0.011);
+    if (fw > 0.18 && fh > 0.18)
+      put(parent, box(fw - 0.13, fh - 0.13, 0.012, color, o), cx, cy, frontZ + 0.005);
+  }
   const hx = vertical ? cx + fw * 0.34 : cx;
   const hy = vertical ? cy : cy + fh * 0.34;
   addHandle(parent, handle, hx, hy, frontZ + 0.011, vertical);
@@ -267,7 +274,8 @@ function addDoor(parent, fw, fh, cx, cy, frontZ, color, o, handle, vertical) {
 /* ---------------- cabinet run (lowers + worktop + uppers) ---------------- */
 function addCabinetRun(parent, o) {
   const g = new THREE.Group();
-  const { length: W, depth: D, nLower, nUpper, woodC, counterC, splashC, gloss, handle, stone, skipUpperAt } = o;
+  const { length: W, depth: D, nLower, nUpper, woodC, counterC, splashC, gloss, handle, stone, skipUpperAt, doorStyle = "shaker", led } = o;
+  const lowerStyle = doorStyle === "glass" ? "shaker" : doorStyle;
   const KICK = 0.1, H = 0.9, gap = 0.016;
 
   // toe kick (recessed dark base)
@@ -283,12 +291,12 @@ function addCabinetRun(parent, o) {
     // a wide cabinet reads as two doors; a tall-ish one keeps a drawer at top
     if (segW > 0.62) {
       const half = (segW - 0.01) / 2;
-      addDoor(g, half, bodyH, x - half / 2, KICK + bodyH / 2, D, woodC, { gloss }, handle, true);
-      addDoor(g, half, bodyH, x + half / 2, KICK + bodyH / 2, D, woodC, { gloss }, handle, true);
+      addDoor(g, half, bodyH, x - half / 2, KICK + bodyH / 2, D, woodC, { gloss }, handle, true, lowerStyle);
+      addDoor(g, half, bodyH, x + half / 2, KICK + bodyH / 2, D, woodC, { gloss }, handle, true, lowerStyle);
     } else {
       const drwH = 0.14;
-      addDoor(g, segW - 0.01, drwH, x, KICK + bodyH - drwH / 2 - 0.01, D, woodC, { gloss }, handle, false);
-      addDoor(g, segW - 0.01, bodyH - drwH - 0.02, x, KICK + (bodyH - drwH) / 2 - 0.01, D, woodC, { gloss }, handle, false);
+      addDoor(g, segW - 0.01, drwH, x, KICK + bodyH - drwH / 2 - 0.01, D, woodC, { gloss }, handle, false, lowerStyle);
+      addDoor(g, segW - 0.01, bodyH - drwH - 0.02, x, KICK + (bodyH - drwH) / 2 - 0.01, D, woodC, { gloss }, handle, false, lowerStyle);
     }
   }
 
@@ -308,7 +316,15 @@ function addCabinetRun(parent, o) {
       if (skipUpperAt != null && i === skipUpperAt) continue;
       const x = -W / 2 + segWu / 2 + i * (segWu + gap);
       put(g, box(segWu - 0.006, Hu, Du, woodC, { gloss }), x, yb + Hu / 2, Du / 2);
-      addDoor(g, segWu - 0.01, Hu, x, yb + Hu / 2, Du, woodC, { gloss }, handle, true);
+      addDoor(g, segWu - 0.01, Hu, x, yb + Hu / 2, Du, woodC, { gloss }, handle, true, doorStyle);
+    }
+    // under-cabinet LED strip (warm glow)
+    if (led) {
+      const strip = new THREE.Mesh(
+        new THREE.BoxGeometry(W - 0.08, 0.018, 0.05),
+        new THREE.MeshStandardMaterial({ color: 0xfff3da, emissive: 0xffe6b8, emissiveIntensity: 1.4, roughness: 0.5 })
+      );
+      put(g, strip, 0, yb - 0.02, 0.07);
     }
   }
   parent.add(g);
@@ -389,20 +405,23 @@ export function buildKitchen(model, cfg) {
 
   // cooking zone sits mid-run; reserve an upper slot for the hood
   const hoodIdx = Math.max(0, Math.min(cfg.kUpper - 1, Math.round(cfg.kUpper * 0.5)));
+  const doorStyle = cfg.doorStyle || "shaker";
+  const lowerStyle = doorStyle === "glass" ? "shaker" : doorStyle;
+  const led = !!cfg.led;
   const main = addCabinetRun(model, {
     length: W, depth: D, nLower: cfg.kLower, nUpper: cfg.kUpper, woodC, counterC, splashC,
-    gloss, handle: cfg.handle, stone, skipUpperAt: (cfg.oven || cfg.microwave) ? hoodIdx : null,
+    gloss, handle: cfg.handle, stone, doorStyle, led, skipUpperAt: (cfg.oven || cfg.microwave) ? hoodIdx : null,
   });
   main.position.set(W / 2, 0, 0);
 
   if (cfg.kLayout === "l" || cfg.kLayout === "u") {
     const sn = Math.max(1, Math.round(cfg.kLower / 3)), su = Math.max(0, Math.round(cfg.kUpper / 3));
-    const right = addCabinetRun(model, { length: Lside, depth: D, nLower: sn, nUpper: su, woodC, counterC, splashC, gloss, handle: cfg.handle, stone });
+    const right = addCabinetRun(model, { length: Lside, depth: D, nLower: sn, nUpper: su, woodC, counterC, splashC, gloss, handle: cfg.handle, stone, doorStyle, led });
     right.rotation.y = -Math.PI / 2; right.position.set(W, 0, D + Lside / 2);
   }
   if (cfg.kLayout === "u") {
     const sn = Math.max(1, Math.round(cfg.kLower / 3)), su = Math.max(0, Math.round(cfg.kUpper / 3));
-    const left = addCabinetRun(model, { length: Lside, depth: D, nLower: sn, nUpper: su, woodC, counterC, splashC, gloss, handle: cfg.handle, stone });
+    const left = addCabinetRun(model, { length: Lside, depth: D, nLower: sn, nUpper: su, woodC, counterC, splashC, gloss, handle: cfg.handle, stone, doorStyle, led });
     left.rotation.y = Math.PI / 2; left.position.set(0, 0, D + Lside / 2);
   }
 
@@ -421,8 +440,8 @@ export function buildKitchen(model, cfg) {
   // tall unit / pantry (left of main run) — full-height larders with doors
   const addTall = (x) => {
     put(model, box(0.6, 2.1, D, woodC, { gloss }), x, 1.05, D / 2);
-    addDoor(model, 0.58, 1.0, x, 1.55, D, woodC, { gloss }, cfg.handle, true);
-    addDoor(model, 0.58, 0.95, x, 0.55, D, woodC, { gloss }, cfg.handle, true);
+    addDoor(model, 0.58, 1.0, x, 1.55, D, woodC, { gloss }, cfg.handle, true, doorStyle);
+    addDoor(model, 0.58, 0.95, x, 0.55, D, woodC, { gloss }, cfg.handle, true, lowerStyle);
   };
   if (cfg.kTall) addTall(-0.34);
   if (cfg.pantry) addTall(cfg.kTall ? -1.0 : -0.34);
@@ -439,8 +458,8 @@ export function buildKitchen(model, cfg) {
     const zc = D + (cfg.kLayout === "straight" ? 1.4 : Lside * 0.62);
     const ig = new THREE.Group();
     put(ig, box(iw, 0.9, id - 0.25, woodC, { gloss }), 0, 0.45, -0.05);
-    addDoor(ig, iw * 0.45, 0.8, -iw * 0.24, 0.46, id - 0.25, woodC, { gloss }, cfg.handle, true);
-    addDoor(ig, iw * 0.45, 0.8, iw * 0.24, 0.46, id - 0.25, woodC, { gloss }, cfg.handle, true);
+    addDoor(ig, iw * 0.45, 0.8, -iw * 0.24, 0.46, id - 0.25, woodC, { gloss }, cfg.handle, true, lowerStyle);
+    addDoor(ig, iw * 0.45, 0.8, iw * 0.24, 0.46, id - 0.25, woodC, { gloss }, cfg.handle, true, lowerStyle);
     // worktop with overhang one side
     put(ig, box(iw + 0.05, 0.05, id, counterC, { stone, gloss: !stone }), 0, 0.925, 0.02);
     // waterfall ends
@@ -458,6 +477,8 @@ export function buildDesk(model, cfg) {
   const woodC = WOOD[cfg.wood] || WOOD.oak;
   const gloss = cfg.gloss;
   const isExec = cfg.dShape === "exec";
+  const dStyle = cfg.doorStyle || "shaker";
+  const dLower = dStyle === "glass" ? "shaker" : dStyle;
   const topT = isExec ? 0.055 : 0.04;
   const legH = H - topT;
 
@@ -516,7 +537,7 @@ export function buildDesk(model, cfg) {
       const fronts = leftKind === "file" ? 2 : 1, fh = (ph - 0.02) / fronts;
       for (let i = 0; i < fronts; i++) {
         const y = 0.01 + fh / 2 + i * fh;
-        addDoor(model, pw - 0.02, fh - 0.014, px, y, pd / 2 + 0.0, woodC, { gloss }, "bar", false);
+        addDoor(model, pw - 0.02, fh - 0.014, px, y, pd / 2 + 0.0, woodC, { gloss }, "bar", false, dLower);
       }
     }
   }
@@ -530,7 +551,7 @@ export function buildDesk(model, cfg) {
   // side storage unit (extends left)
   if (cfg.dSide) {
     put(model, box(0.4, H, D - 0.04, woodC, { gloss }), -(W / 2 + 0.22), H / 2, 0);
-    addDoor(model, 0.36, H * 0.5, -(W / 2 + 0.22), H * 0.62, (D - 0.04) / 2, woodC, { gloss }, cfg.handle, false);
+    addDoor(model, 0.36, H * 0.5, -(W / 2 + 0.22), H * 0.62, (D - 0.04) / 2, woodC, { gloss }, cfg.handle, false, dLower);
   }
   if (cfg.printer) put(model, box(0.42, 0.03, 0.32, woodC, { gloss }), -(W / 2 + 0.22), H + 0.02, 0);
 
