@@ -271,44 +271,91 @@ function addDoor(parent, fw, fh, cx, cy, frontZ, color, o, handle, vertical, sty
   addHandle(parent, handle, hx, hy, frontZ + 0.011, vertical);
 }
 
-/* ---------------- cabinet run (lowers + worktop + uppers) ---------------- */
-function addCabinetRun(parent, o) {
-  const g = new THREE.Group();
-  const { length: W, depth: D, nLower, nUpper, woodC, counterC, splashC, gloss, handle, stone, skipUpperAt, doorStyle = "shaker", led } = o;
-  const lowerStyle = doorStyle === "glass" ? "shaker" : doorStyle;
-  const KICK = 0.1, H = 0.9, gap = 0.016;
-
-  // toe kick (recessed dark base)
-  put(g, box(W - 0.02, KICK, D - 0.07, "#262320"), 0, KICK / 2, D / 2 - 0.02);
-
-  // lower carcasses + doors
-  const n = Math.max(1, nLower);
-  const segW = (W - gap * (n - 1)) / n;
-  const bodyH = H - KICK;
-  for (let i = 0; i < n; i++) {
-    const x = -W / 2 + segW / 2 + i * (segW + gap);
-    put(g, box(segW - 0.006, bodyH, D, woodC, { gloss }), x, KICK + bodyH / 2, D / 2);
-    // a wide cabinet reads as two doors; a tall-ish one keeps a drawer at top
-    if (segW > 0.62) {
-      const half = (segW - 0.01) / 2;
-      addDoor(g, half, bodyH, x - half / 2, KICK + bodyH / 2, D, woodC, { gloss }, handle, true, lowerStyle);
-      addDoor(g, half, bodyH, x + half / 2, KICK + bodyH / 2, D, woodC, { gloss }, handle, true, lowerStyle);
+/* ---------------- one base cabinet: detailed carcass + face ---------------- */
+const UNIT_DEFAULT_W = { door: 60, doors2: 90, drawers: 60, open: 60, sink: 90, oven: 60, dishwasher: 60 };
+function addCarcass(ug, w, D, bodyH, baseY, col, o) {
+  const t = 0.018;
+  put(ug, box(w, bodyH, t, col, o), 0, baseY + bodyH / 2, t / 2);                 // back panel
+  put(ug, box(t, bodyH, D, col, o), -w / 2 + t / 2, baseY + bodyH / 2, D / 2);    // left gable
+  put(ug, box(t, bodyH, D, col, o), w / 2 - t / 2, baseY + bodyH / 2, D / 2);     // right gable
+  put(ug, box(w - 2 * t, t, D - t, col, o), 0, baseY + t / 2, D / 2);             // bottom panel
+  put(ug, box(w - 2 * t, t, 0.09, col, o), 0, baseY + bodyH - t / 2, 0.06);       // top front rail
+  put(ug, box(w - 2 * t, t, 0.09, col, o), 0, baseY + bodyH - t / 2, D - 0.05);   // top back rail
+}
+function addBaseUnit(ug, o) {
+  const { kind, w, D, bodyH, baseY, topY, woodC, gloss, handle, lowerStyle, counterC, stone } = o;
+  addCarcass(ug, w, D, bodyH, baseY, woodC, { gloss });
+  const fz = D;
+  if (kind === "drawers") {
+    const n = bodyH > 0.7 ? 4 : 3, fh = (bodyH - 0.02) / n;
+    for (let i = 0; i < n; i++) addDoor(ug, w - 0.01, fh - 0.012, 0, baseY + 0.01 + fh / 2 + i * fh, fz, woodC, { gloss }, handle, false, lowerStyle);
+  } else if (kind === "open") {
+    for (let i = 1; i <= 2; i++) put(ug, box(w - 0.045, 0.02, D - 0.05, woodC, { gloss }), 0, baseY + (bodyH / 3) * i, D / 2);
+  } else if (kind === "sink") {
+    const half = (w - 0.01) / 2;
+    addDoor(ug, half, bodyH, -half / 2, baseY + bodyH / 2, fz, woodC, { gloss }, handle, true, lowerStyle);
+    addDoor(ug, half, bodyH, half / 2, baseY + bodyH / 2, fz, woodC, { gloss }, handle, true, lowerStyle);
+    addSink(ug, 0, D, topY, counterC, stone);
+  } else if (kind === "oven") {
+    addOven(ug, 0, D); addHob(ug, 0, D, topY); addHood(ug, 0, D, woodC, gloss);
+    addDoor(ug, w - 0.01, 0.16, 0, baseY + 0.09, fz, woodC, { gloss }, handle, false, lowerStyle);
+  } else if (kind === "dishwasher") {
+    put(ug, box(w - 0.012, bodyH - 0.012, 0.02, woodC, { gloss }), 0, baseY + bodyH / 2, fz + 0.011);
+    put(ug, box(w - 0.1, 0.02, 0.024, "#2A2724", { metal: true }), 0, baseY + bodyH - 0.06, fz + 0.02);
+  } else { // door
+    if (w > 0.62) {
+      const half = (w - 0.01) / 2;
+      addDoor(ug, half, bodyH, -half / 2, baseY + bodyH / 2, fz, woodC, { gloss }, handle, true, lowerStyle);
+      addDoor(ug, half, bodyH, half / 2, baseY + bodyH / 2, fz, woodC, { gloss }, handle, true, lowerStyle);
     } else {
       const drwH = 0.14;
-      addDoor(g, segW - 0.01, drwH, x, KICK + bodyH - drwH / 2 - 0.01, D, woodC, { gloss }, handle, false, lowerStyle);
-      addDoor(g, segW - 0.01, bodyH - drwH - 0.02, x, KICK + (bodyH - drwH) / 2 - 0.01, D, woodC, { gloss }, handle, false, lowerStyle);
+      addDoor(ug, w - 0.01, drwH, 0, baseY + bodyH - drwH / 2 - 0.01, fz, woodC, { gloss }, handle, false, lowerStyle);
+      addDoor(ug, w - 0.01, bodyH - drwH - 0.02, 0, baseY + (bodyH - drwH) / 2 - 0.01, fz, woodC, { gloss }, handle, true, lowerStyle);
     }
   }
+}
+
+/* ---------------- cabinet run (modular base units + worktop + uppers) ---------------- */
+function addCabinetRun(parent, o) {
+  const g = new THREE.Group();
+  const { length: W, depth: D, units, nUpper, woodC, counterC, splashC, gloss, handle, stone, skipUpperAt, doorStyle = "shaker", led, selectedId } = o;
+  const lowerStyle = doorStyle === "glass" ? "shaker" : doorStyle;
+  const KICK = 0.1, H = 0.9, gap = 0.016, topY = H;
+  const list = units && units.length ? units : [{ kind: "door", w: 60 }];
+  const sumW = list.reduce((a, u) => a + (u.w || 60), 0);
+  const bodyH = H - KICK;
+
+  // continuous plinth (toe kick)
+  put(g, box(W - 0.02, KICK, D - 0.07, "#262320"), 0, KICK / 2, D / 2 - 0.02);
+
+  // base units laid left -> right, each in its own pickable group
+  let cursor = -W / 2;
+  list.forEach((u, i) => {
+    const uw = W * ((u.w || 60) / sumW);
+    const cx = cursor + uw / 2;
+    const ug = new THREE.Group();
+    ug.position.x = cx;
+    ug.userData = { unitId: u.id, unitIndex: i, pickable: true };
+    addBaseUnit(ug, { kind: u.kind, w: uw - gap, D, bodyH, baseY: KICK, topY, woodC, gloss, handle, lowerStyle, counterC, stone });
+    if (selectedId && u.id === selectedId) {
+      const eg = new THREE.EdgesGeometry(new THREE.BoxGeometry(uw - gap + 0.02, bodyH + 0.04, D + 0.04));
+      const ls = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0xB0794A }));
+      ls.position.set(0, KICK + bodyH / 2, D / 2);
+      ug.add(ls);
+    }
+    g.add(ug);
+    cursor += uw;
+  });
 
   // worktop with overhang + slim front fascia
   if (counterC) {
-    put(g, box(W + 0.03, 0.04, D + 0.035, counterC, { stone: stone, gloss: !stone }), 0, H + 0.02, D / 2 + 0.005);
-    put(g, box(W + 0.03, 0.018, 0.012, counterC, { stone: stone, gloss: !stone }), 0, H + 0.001, D + 0.022);
+    put(g, box(W + 0.03, 0.04, D + 0.035, counterC, { stone, gloss: !stone }), 0, H + 0.02, D / 2 + 0.005);
+    put(g, box(W + 0.03, 0.018, 0.012, counterC, { stone, gloss: !stone }), 0, H + 0.001, D + 0.022);
   }
   // backsplash
   if (splashC) put(g, box(W, 0.5, 0.018, splashC, {}), 0, H + 0.04 + 0.25, 0.009);
 
-  // upper carcasses + doors
+  // upper carcasses + doors + cornice + LED
   if (nUpper > 0) {
     const Du = 0.34, Hu = 0.72, yb = 1.5;
     const m = nUpper, segWu = (W - gap * (m - 1)) / m;
@@ -318,7 +365,7 @@ function addCabinetRun(parent, o) {
       put(g, box(segWu - 0.006, Hu, Du, woodC, { gloss }), x, yb + Hu / 2, Du / 2);
       addDoor(g, segWu - 0.01, Hu, x, yb + Hu / 2, Du, woodC, { gloss }, handle, true, doorStyle);
     }
-    // under-cabinet LED strip (warm glow)
+    put(g, box(W, 0.04, Du + 0.03, woodC, { gloss }), 0, yb + Hu + 0.02, Du / 2); // cornice
     if (led) {
       const strip = new THREE.Mesh(
         new THREE.BoxGeometry(W - 0.08, 0.018, 0.05),
@@ -392,6 +439,14 @@ function addMicrowave(parent, x, yb, Du) {
   parent.add(g); g.position.x = x; return g;
 }
 
+/* default modular run when a saved layout isn't supplied */
+export function defaultKitchenUnits(n = 5) {
+  const kinds = ["drawers", "sink", "door", "oven", "door", "drawers", "door", "door"];
+  const out = [];
+  for (let i = 0; i < Math.max(2, n); i++) out.push({ id: "u" + i + "_" + Math.random().toString(36).slice(2, 7), kind: kinds[i % kinds.length], w: 60 });
+  return out;
+}
+
 /* ============================ KITCHEN ============================ */
 export function buildKitchen(model, cfg) {
   const W = cfg.kW / 100, D = cfg.kD / 100;
@@ -401,37 +456,40 @@ export function buildKitchen(model, cfg) {
   const stone = STONE_IDS.includes(cfg.counter);
   const gloss = cfg.gloss;
   const Lside = Math.min(Math.max(W * 0.55, 1.0), 2.2);
-  const topY = 0.9;
 
-  // cooking zone sits mid-run; reserve an upper slot for the hood
-  const hoodIdx = Math.max(0, Math.min(cfg.kUpper - 1, Math.round(cfg.kUpper * 0.5)));
+  const units = (cfg.kUnits && cfg.kUnits.length) ? cfg.kUnits : defaultKitchenUnits(cfg.kLower || 5);
+  const sumW = units.reduce((a, u) => a + (u.w || 60), 0);
   const doorStyle = cfg.doorStyle || "shaker";
   const lowerStyle = doorStyle === "glass" ? "shaker" : doorStyle;
   const led = !!cfg.led;
+
+  // reserve the upper slot above the oven unit for the hood
+  let skipUpperAt = null;
+  const ovenIdx = units.findIndex((u) => u.kind === "oven");
+  if (ovenIdx >= 0 && cfg.kUpper > 0) {
+    let acc = 0; for (let k = 0; k < ovenIdx; k++) acc += (units[k].w || 60);
+    const f = (acc + (units[ovenIdx].w || 60) / 2) / sumW;
+    skipUpperAt = Math.max(0, Math.min(cfg.kUpper - 1, Math.round(f * cfg.kUpper - 0.5)));
+  }
+
   const main = addCabinetRun(model, {
-    length: W, depth: D, nLower: cfg.kLower, nUpper: cfg.kUpper, woodC, counterC, splashC,
-    gloss, handle: cfg.handle, stone, doorStyle, led, skipUpperAt: (cfg.oven || cfg.microwave) ? hoodIdx : null,
+    length: W, depth: D, units, nUpper: cfg.kUpper, woodC, counterC, splashC,
+    gloss, handle: cfg.handle, stone, doorStyle, led, skipUpperAt, selectedId: cfg.selectedUnit,
   });
   main.position.set(W / 2, 0, 0);
 
+  const sideUnits = (n) => Array.from({ length: Math.max(1, n) }, (_, k) => ({ id: "s" + k, kind: k === 0 ? "drawers" : "door", w: 60 }));
   if (cfg.kLayout === "l" || cfg.kLayout === "u") {
-    const sn = Math.max(1, Math.round(cfg.kLower / 3)), su = Math.max(0, Math.round(cfg.kUpper / 3));
-    const right = addCabinetRun(model, { length: Lside, depth: D, nLower: sn, nUpper: su, woodC, counterC, splashC, gloss, handle: cfg.handle, stone, doorStyle, led });
+    const sn = Math.max(1, Math.round(units.length / 3)), su = Math.max(0, Math.round(cfg.kUpper / 3));
+    const right = addCabinetRun(model, { length: Lside, depth: D, units: sideUnits(sn), nUpper: su, woodC, counterC, splashC, gloss, handle: cfg.handle, stone, doorStyle, led });
     right.rotation.y = -Math.PI / 2; right.position.set(W, 0, D + Lside / 2);
   }
   if (cfg.kLayout === "u") {
-    const sn = Math.max(1, Math.round(cfg.kLower / 3)), su = Math.max(0, Math.round(cfg.kUpper / 3));
-    const left = addCabinetRun(model, { length: Lside, depth: D, nLower: sn, nUpper: su, woodC, counterC, splashC, gloss, handle: cfg.handle, stone, doorStyle, led });
+    const sn = Math.max(1, Math.round(units.length / 3)), su = Math.max(0, Math.round(cfg.kUpper / 3));
+    const left = addCabinetRun(model, { length: Lside, depth: D, units: sideUnits(sn), nUpper: su, woodC, counterC, splashC, gloss, handle: cfg.handle, stone, doorStyle, led });
     left.rotation.y = Math.PI / 2; left.position.set(0, 0, D + Lside / 2);
   }
 
-  // sink position along main width
-  const sinkX = cfg.sink === "left" ? W * 0.2 : cfg.sink === "right" ? W * 0.8 : W * 0.5;
-  addSink(model, sinkX, D, topY, counterC, stone);
-
-  // cooking zone (oven + hob + hood) placed away from the sink
-  const cookX = cfg.sink === "right" ? W * 0.3 : W * 0.7;
-  if (cfg.oven) { addOven(model, cookX, D); addHob(model, cookX, D, topY); addHood(model, cookX, D, woodC, gloss); }
   if (cfg.microwave) addMicrowave(model, W * 0.86, 1.5, 0.34);
 
   // fridge (right of main run)
@@ -485,6 +543,14 @@ export function buildDesk(model, cfg) {
   // top + slim edge band
   put(model, box(W, topT, D, topC, { gloss }), 0, H - topT / 2, 0);
   put(model, box(W + 0.004, 0.012, D + 0.004, topC, { gloss }), 0, H - topT, 0);
+
+  // apron rails under the top (a built, solid look) for timber / panel / pedestal bases
+  if (cfg.leg === "timber" || cfg.leg === "panel" || cfg.leg === "pedestal" || isExec) {
+    const ay = H - topT - 0.05;
+    put(model, box(W - 0.16, 0.08, 0.025, woodC, { gloss }), 0, ay, -(D / 2) + 0.05);          // back apron
+    put(model, box(0.025, 0.08, D - 0.16, woodC, { gloss }), -(W / 2) + 0.05, ay, 0);           // left apron
+    put(model, box(0.025, 0.08, D - 0.16, woodC, { gloss }), (W / 2) - 0.05, ay, 0);            // right apron
+  }
 
   // base / legs
   if (cfg.leg === "timber" || isExec) {
