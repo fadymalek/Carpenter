@@ -86,6 +86,8 @@ const STR = {
   matte: L("Matte", "مطفي"),
   glossy: L("Glossy", "لامع"),
   handle: L("Handle style", "نوع المقابض"),
+  doorStyle: L("Door front", "واجهة الباب"),
+  led: L("Under-cabinet LED", "إضاءة تحت الخزائن"),
   hardware: L("Hardware quality", "جودة الإكسسوارات"),
   countertop: L("Countertop", "سطح العمل"),
   backsplash: L("Backsplash", "الواجهة الخلفية"),
@@ -153,6 +155,12 @@ const HANDLES = [
   { id: "edge", l: L("Handleless", "بدون مقابض") },
   { id: "recessed", l: L("Recessed", "غائر") },
 ];
+const DOORS = [
+  { id: "shaker", l: L("Shaker frame", "شيكر بإطار") },
+  { id: "flat", l: L("Flat panel", "سادة مسطّح") },
+  { id: "slab", l: L("Handleless slab", "سادة بدون مقابض") },
+  { id: "glass", l: L("Glass upper", "زجاج علوي") },
+];
 const LEGS = [
   { id: "timber", l: L("Timber Legs", "أرجل خشب") },
   { id: "panel", l: L("Panel Sides", "جوانب لوحية") },
@@ -167,12 +175,38 @@ const HARDWARE = [
 
 const colorOf = (list, id) => (list.find((x) => x.id === id) || list[0]).c;
 
+/* ---- richer material swatch fills (CSS preview of the real texture) ---- */
+const GRAIN_IDS = ["oak", "walnut", "ash", "espresso", "bamboo", "butcher"];
+const _shade = (hex, amt) => {
+  const h = hex.replace("#", "");
+  const n = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h, 16);
+  const cl = (v) => Math.max(0, Math.min(255, v));
+  const r = cl(((n >> 16) & 255) + amt), g = cl(((n >> 8) & 255) + amt), b = cl((n & 255) + amt);
+  return `rgb(${r},${g},${b})`;
+};
+function swatchBg(id, c) {
+  if (!c) return "transparent";
+  if (GRAIN_IDS.includes(id)) {
+    // wood grain: fine darker fibres + a couple of lighter streaks over the base
+    return `repeating-linear-gradient(92deg, ${_shade(c, -16)} 0 1px, transparent 1px 6px),`
+      + `repeating-linear-gradient(92deg, ${_shade(c, 12)} 0 1px, transparent 1px 17px), ${c}`;
+  }
+  if (id === "granite") return `radial-gradient(circle at 30% 30%, ${_shade(c, 40)} 0 1px, transparent 2px), radial-gradient(circle at 70% 60%, ${_shade(c, 55)} 0 1px, transparent 2px), radial-gradient(circle at 50% 80%, ${_shade(c, 30)} 0 1px, transparent 2px), ${c}`;
+  if (id === "marble") return `linear-gradient(125deg, transparent 46%, ${_shade(c, -18)} 47% 48%, transparent 49%), linear-gradient(105deg, transparent 62%, ${_shade(c, -12)} 63%, transparent 64%), ${c}`;
+  if (id === "quartzw") return `radial-gradient(circle at 40% 40%, ${_shade(c, -8)} 0 1px, transparent 2px), ${c}`;
+  if (id === "concrete") return `radial-gradient(circle at 35% 30%, ${_shade(c, 14)} 0 22%, transparent 40%), radial-gradient(circle at 75% 70%, ${_shade(c, -12)} 0 18%, transparent 36%), ${c}`;
+  if (id === "glass") return `linear-gradient(135deg, ${_shade(c, 22)} 0%, ${c} 45%, ${_shade(c, -10)} 100%)`;
+  if (id === "blacklam") return `linear-gradient(135deg, ${_shade(c, 18)} 0%, ${c} 60%)`;
+  // painted MDF / solid: soft top sheen
+  return `linear-gradient(160deg, ${_shade(c, 10)} 0%, ${c} 55%, ${_shade(c, -8)} 100%)`;
+}
+
 /* --------------------------- defaults --------------------------- */
 const DEFAULTS = {
   product: "kitchen",
   kW: 300, kH: 240, kD: 60, kLayout: "straight", kLower: 4, kUpper: 4, kTall: false, kIsland: false,
   dW: 140, dD: 70, dH: 74, dShape: "straight", dDrawers: 2, dShelves: 1, dSide: false, dCable: true, dMonitor: false, dKeyboard: false,
-  wood: "oak", gloss: false, handle: "bar", hardware: "premium",
+  wood: "oak", gloss: false, handle: "bar", hardware: "premium", doorStyle: "shaker", led: false,
   counter: "quartzw", backsplash: "tile",
   deskTop: "oak", leg: "timber",
   corner: false, sink: "center", oven: true, fridge: true, microwave: false, openShelf: false, pantry: false,
@@ -188,13 +222,15 @@ function priceRange(cfg) {
     p = 6000 * (cfg.kW / 100) + 1200 * cfg.kLower + 900 * cfg.kUpper;
     p += (cfg.kTall ? 5000 : 0) + (cfg.kIsland ? 12000 : 0);
     p += (cfg.oven ? 3000 : 0) + (cfg.microwave ? 1500 : 0) + (cfg.pantry ? 4000 : 0);
-    p += (cfg.corner ? 2500 : 0) + (cfg.openShelf ? 1200 : 0);
+    p += (cfg.corner ? 2500 : 0) + (cfg.openShelf ? 1200 : 0) + (cfg.led ? 1800 : 0);
     p += { quartzw: 4000, granite: 6000, butcher: 3000, marble: 9000, concrete: 3500 }[cfg.counter] || 0;
+    p += { shaker: 0, flat: 600, slab: 1200, glass: 2400 }[cfg.doorStyle] || 0;
   } else {
     p = 4000 + 5000 * (cfg.dW / 100) + 1500 * cfg.dDrawers + 900 * cfg.dShelves;
     p += (cfg.dSide ? 3500 : 0) + (cfg.dMonitor ? 900 : 0) + (cfg.dKeyboard ? 700 : 0);
     p += (cfg.fileCab ? 2500 : 0) + (cfg.closed ? 2000 : 0) + (cfg.printer ? 900 : 0);
     p += { timber: 0, panel: 1500, steel: 1200, pedestal: 3000 }[cfg.leg] || 0;
+    p += { shaker: 0, flat: 400, slab: 800, glass: 1600 }[cfg.doorStyle] || 0;
   }
   if (cfg.gloss) p *= 1.06;
   p *= hw;
@@ -229,7 +265,7 @@ function Preview3D({ config, lang, snapRef }) {
   const S = useRef(null);
 
   const geoSig = useMemo(() => {
-    const k = ["product", "kW", "kH", "kD", "kLayout", "kLower", "kUpper", "kTall", "kIsland", "dW", "dD", "dH", "dShape", "dDrawers", "dShelves", "dSide", "dCable", "dMonitor", "dKeyboard", "wood", "gloss", "counter", "backsplash", "deskTop", "leg", "corner", "sink", "oven", "fridge", "microwave", "openShelf", "pantry", "closed", "cpu", "printer", "fileCab", "cableHole", "grommet"];
+    const k = ["product", "kW", "kH", "kD", "kLayout", "kLower", "kUpper", "kTall", "kIsland", "dW", "dD", "dH", "dShape", "dDrawers", "dShelves", "dSide", "dCable", "dMonitor", "dKeyboard", "wood", "gloss", "counter", "backsplash", "deskTop", "leg", "corner", "sink", "oven", "fridge", "microwave", "openShelf", "pantry", "closed", "cpu", "printer", "fileCab", "cableHole", "grommet", "doorStyle", "led"];
     return k.map((x) => config[x]).join("|");
   }, [config]);
 
@@ -404,16 +440,17 @@ function Choice({ active, onClick, icon: Icon, title, sub, big }) {
 
 function Swatches({ items, value, onChange, lang }) {
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 12 }}>
       {items.map((it) => {
         const active = value === it.id;
         return (
           <button key={it.id} onClick={() => onChange(it.id)} title={it.l[lang]}
-            style={{ cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 7, background: "none", border: "none", width: 72 }}>
-            <span style={{ width: 46, height: 46, borderRadius: 999, background: it.c || "transparent", border: it.c ? `2px solid ${active ? C.oak : "rgba(0,0,0,.12)"}` : `2px dashed ${active ? C.oak : C.line}`, boxShadow: active ? `0 0 0 3px ${C.cream}, 0 0 0 5px ${C.oak}` : "none", transition: "all .15s", display: "grid", placeItems: "center" }}>
-              {!it.c && <X size={16} style={{ color: C.muted }} />}
+            style={{ cursor: "pointer", display: "flex", flexDirection: "column", gap: 8, background: "none", border: "none", padding: 0, textAlign: "start" }}>
+            <span style={{ position: "relative", width: "100%", height: 58, borderRadius: 8, background: swatchBg(it.id, it.c), backgroundColor: it.c || "transparent", border: it.c ? `1px solid rgba(0,0,0,.14)` : `2px dashed ${active ? C.oak : C.line}`, boxShadow: active ? `0 0 0 2px ${C.paper}, 0 0 0 4px ${C.oak}, 0 6px 14px -8px rgba(62,44,30,.5)` : "0 1px 2px rgba(62,44,30,.12)", transition: "all .15s", display: "grid", placeItems: "center", overflow: "hidden" }}>
+              {!it.c && <X size={18} style={{ color: C.muted }} />}
+              {active && it.c && <span style={{ position: "absolute", top: 6, insetInlineEnd: 6, width: 18, height: 18, borderRadius: 999, background: C.oak, display: "grid", placeItems: "center" }}><Check size={12} color="#fff" /></span>}
             </span>
-            <span style={{ fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 12, textAlign: "center", lineHeight: 1.25, color: active ? C.walnutDark : C.muted, fontWeight: active ? 700 : 500 }}>{it.l[lang]}</span>
+            <span style={{ fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 12.5, lineHeight: 1.25, color: active ? C.walnutDark : C.muted, fontWeight: active ? 700 : 500 }}>{it.l[lang]}</span>
           </button>
         );
       })}
@@ -495,7 +532,7 @@ const inputStyle = { width: "100%", fontFamily: "'Hanken Grotesk',sans-serif", f
 
 /* ===================== APP ===================== */
 export default function App() {
-  const [lang, setLang] = useState("en");
+  const [lang, setLang] = useState("ar");
   const [step, setStep] = useState(0);
   const [cfg, setCfg] = useState(DEFAULTS);
   const [sent, setSent] = useState(false);
@@ -503,12 +540,17 @@ export default function App() {
   const snapRef = useRef(null);
   const fileRef = useRef(null);
 
-  // preselect product from /configure?product=Kitchen|Office%20Desk
+  // preselect product from /configure?product=Kitchen|Office%20Desk + restore language
   useEffect(() => {
     if (typeof window === "undefined") return;
     const p = new URLSearchParams(window.location.search).get("product");
     if (p) setCfg((c) => ({ ...c, product: /esk/i.test(p) ? "desk" : "kitchen" }));
+    const saved = window.localStorage.getItem("hewn-lang");
+    if (saved === "en" || saved === "ar") setLang(saved);
   }, []);
+  useEffect(() => {
+    if (typeof window !== "undefined") window.localStorage.setItem("hewn-lang", lang);
+  }, [lang]);
 
   const dir = lang === "ar" ? "rtl" : "ltr";
   const t = (key) => STR[key][lang];
@@ -559,7 +601,7 @@ export default function App() {
     <Shell lang={lang} setLang={setLang} dir={dir} step={step} totalSteps={totalSteps} onSave={saveDesign}>
       <div style={{ display: "flex", flexDirection: "column-reverse", gap: 26 }} className="cfg-grid">
         {/* CONTROLS */}
-        <div style={{ flex: "1 1 56%", minWidth: 0 }} className="cfg-controls">
+        <div style={{ flex: "1 1 54%", minWidth: 0 }} className="cfg-controls">
           <div style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: 6, padding: "clamp(22px,3.5vw,36px)" }}>
             {step === 0 && <StepProduct cfg={cfg} set={set} t={t} lang={lang} />}
             {step === 1 && <StepDimensions cfg={cfg} set={set} t={t} lang={lang} isK={isK} />}
@@ -580,9 +622,9 @@ export default function App() {
         </div>
 
         {/* PREVIEW + SUMMARY */}
-        <div style={{ flex: "1 1 42%", minWidth: 0 }} className="cfg-preview">
+        <div style={{ flex: "1 1 46%", minWidth: 0 }} className="cfg-preview">
           <div className="cfg-sticky">
-            <div style={{ aspectRatio: "4 / 3.4", border: `1px solid ${C.line}`, borderRadius: 6, overflow: "hidden", marginBottom: 16 }}>
+            <div className="cfg-stage" style={{ aspectRatio: "4 / 3.6", border: `1px solid ${C.line}`, borderRadius: 6, overflow: "hidden", marginBottom: 16, boxShadow: "0 20px 50px -34px rgba(62,44,30,.55)" }}>
               <Preview3D config={cfg} lang={lang} snapRef={snapRef} />
             </div>
             <SummaryPanel cfg={cfg} t={t} lang={lang} isK={isK} price={price} />
@@ -657,10 +699,17 @@ function StepMaterials({ cfg, set, t, lang, isK }) {
       <Swatches items={WOODS} value={cfg.wood} onChange={set("wood")} lang={lang} />
       <FieldLabel>{t("finishType")}</FieldLabel>
       <Pills lang={lang} value={cfg.gloss ? "gloss" : "matte"} onChange={(v) => set("gloss")(v === "gloss")} items={[{ id: "matte", l: STR.matte }, { id: "gloss", l: STR.glossy }]} />
+      <FieldLabel>{t("doorStyle")}</FieldLabel>
+      <Pills lang={lang} value={cfg.doorStyle} onChange={set("doorStyle")} items={DOORS} />
       <FieldLabel>{t("handle")}</FieldLabel>
       <Pills lang={lang} value={cfg.handle} onChange={set("handle")} items={HANDLES} />
       <FieldLabel>{t("hardware")}</FieldLabel>
       <Pills lang={lang} value={cfg.hardware} onChange={set("hardware")} items={HARDWARE} />
+      {isK && (
+        <div style={{ marginTop: 22 }}>
+          <Toggle label={t("led")} sub={L("Warm glow strip under wall units", "شريط إضاءة دافئ تحت الوحدات العلوية")[lang]} value={cfg.led} onChange={set("led")} />
+        </div>
+      )}
       {isK ? (
         <>
           <FieldLabel>{t("countertop")}</FieldLabel>
@@ -717,6 +766,7 @@ function rowsFor(cfg, lang, isK, t) {
     [STR.depth[lang], `${isK ? cfg.kD : cfg.dD} ${t("cm")}`],
     [STR.height[lang], `${isK ? cfg.kH : cfg.dH} ${t("cm")}`],
     [STR.woodFinish[lang], wood + (cfg.gloss ? ` · ${STR.glossy[lang]}` : ` · ${STR.matte[lang]}`)],
+    [STR.doorStyle[lang], (DOORS.find((d) => d.id === cfg.doorStyle) || DOORS[0]).l[lang]],
   ];
   if (isK) {
     base.push([STR.layout[lang], { straight: "Straight", l: "L-shape", u: "U-shape" }[cfg.kLayout]]);
@@ -731,7 +781,7 @@ function rowsFor(cfg, lang, isK, t) {
 }
 function featureList(cfg, lang, isK) {
   const map = isK
-    ? { kTall: L("Tall unit", "وحدة طويلة"), kIsland: L("Island", "جزيرة"), corner: L("Corner unit", "ركنية"), oven: L("Oven", "فرن"), fridge: L("Fridge", "ثلاجة"), microwave: L("Microwave", "ميكروويف"), openShelf: L("Open shelves", "أرفف"), pantry: L("Pantry", "مؤن") }
+    ? { kTall: L("Tall unit", "وحدة طويلة"), kIsland: L("Island", "جزيرة"), corner: L("Corner unit", "ركنية"), oven: L("Oven", "فرن"), fridge: L("Fridge", "ثلاجة"), microwave: L("Microwave", "ميكروويف"), openShelf: L("Open shelves", "أرفف"), pantry: L("Pantry", "مؤن"), led: L("LED lighting", "إضاءة LED") }
     : { dSide: L("Side unit", "جانبية"), dCable: L("Cable mgmt", "كابلات"), dMonitor: L("Monitor shelf", "رف شاشة"), dKeyboard: L("Keyboard tray", "درج كيبورد"), closed: L("Closed storage", "مغلق"), cpu: L("CPU space", "كمبيوتر"), printer: L("Printer shelf", "طابعة"), fileCab: L("File cabinet", "ملفات") };
   return Object.keys(map).filter((k) => cfg[k]).map((k) => map[k][lang]);
 }
@@ -845,6 +895,7 @@ function Shell({ children, lang, setLang, dir, step, totalSteps, onSave, hidePro
         @media(min-width:1024px){
           .cfg-grid{flex-direction:row!important}
           .cfg-sticky{position:sticky;top:88px}
+          .cfg-stage{aspect-ratio:auto!important;height:calc(100vh - 210px);min-height:480px}
         }
       `}</style>
 
