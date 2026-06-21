@@ -203,6 +203,26 @@ function priceRange(cfg) {
 }
 
 
+/* Soft studio environment so metal, stone and gloss finishes pick up
+   real reflections instead of looking like flat plastic. */
+function studioEnv(renderer) {
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const sc = new THREE.Scene();
+  sc.background = new THREE.Color(0x3c3c44);
+  const panel = (c, x, y, z, w, h, d) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshBasicMaterial({ color: c }));
+    m.position.set(x, y, z); sc.add(m);
+  };
+  panel(0xffffff, 0, 9, 0, 20, 0.1, 20);   // bright ceiling (key)
+  panel(0xfff0db, -7, 3, 5, 0.1, 9, 9);    // warm left
+  panel(0xd9e6ff, 7, 3, -5, 0.1, 9, 9);    // cool right
+  panel(0xb9b4ad, 0, 3, -9, 20, 9, 0.1);   // neutral back
+  const tex = pmrem.fromScene(sc, 0.5).texture;
+  pmrem.dispose();
+  sc.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+  return tex;
+}
+
 /* ========================= 3D PREVIEW ========================= */
 function Preview3D({ config, lang, snapRef }) {
   const mountRef = useRef(null);
@@ -238,8 +258,11 @@ function Preview3D({ config, lang, snapRef }) {
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(36, w / h, 0.1, 100);
 
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x9a8f7f, 0.55));
-    scene.add(new THREE.AmbientLight(0xffffff, 0.22));
+    let envTex = null;
+    try { envTex = studioEnv(renderer); scene.environment = envTex; } catch (e) { /* env optional */ }
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x9a8f7f, 0.4));
+    scene.add(new THREE.AmbientLight(0xffffff, 0.14));
     const key = new THREE.DirectionalLight(0xfff2df, 1.15);
     key.position.set(4.5, 7, 5);
     key.castShadow = true;
@@ -261,7 +284,7 @@ function Preview3D({ config, lang, snapRef }) {
 
     const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     S.current = {
-      renderer, scene, camera, key, ground, model: null,
+      renderer, scene, camera, key, ground, envTex, model: null, lastProduct: null,
       theta: Math.PI * 0.78, phi: 1.02, radius: 6, target: new THREE.Vector3(0, 0.6, 0),
       dragging: false, px: 0, py: 0, auto: !reduce, raf: 0, failed: false,
     };
@@ -319,6 +342,7 @@ function Preview3D({ config, lang, snapRef }) {
       el.removeEventListener("wheel", onWheel);
       if (s.model) disposeGroup(s.model);
       disposeGroup(scene);
+      if (s.envTex) s.envTex.dispose();
       renderer.dispose();
       if (el.parentNode) el.parentNode.removeChild(el);
       S.current = null;
@@ -342,8 +366,13 @@ function Preview3D({ config, lang, snapRef }) {
     s.model = model;
 
     const maxDim = Math.max(size.x, size.y, size.z);
+    // keep the user's orbit on material/dimension tweaks; only re-frame
+    // when switching product or when the model no longer fits the view.
+    const productChanged = s.lastProduct !== config.product;
+    const fitR = Math.max(2.6, maxDim * 1.7);
     s.target.set(0, size.y / 2, 0);
-    s.radius = Math.max(2.6, maxDim * 1.7);
+    if (productChanged || s.radius < fitR * 0.55 || s.radius > fitR * 1.8) s.radius = fitR;
+    s.lastProduct = config.product;
     s.updateCam && s.updateCam();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geoSig]);
