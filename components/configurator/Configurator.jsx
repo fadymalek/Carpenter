@@ -186,7 +186,7 @@ const UNIT_KINDS = [
   { id: "dishwasher", l: L("Dishwasher", "غسالة أطباق"), icon: "◫", min: 45, max: 60, def: 60 },
 ];
 const unitKind = (id) => UNIT_KINDS.find((k) => k.id === id) || UNIT_KINDS[0];
-const makeUnit = (kind = "door") => ({ id: uid(), kind, w: unitKind(kind).def });
+const makeUnit = (kind = "door") => ({ id: uid(), kind, w: unitKind(kind).def, shelves: 2, drawers: 3 });
 const defaultKUnits = () => [
   makeUnit("drawers"), makeUnit("sink"), makeUnit("door"), makeUnit("oven"), makeUnit("drawers"),
 ];
@@ -220,7 +220,7 @@ function swatchBg(id, c) {
 /* --------------------------- defaults --------------------------- */
 const DEFAULTS = {
   product: "kitchen",
-  kW: 300, kH: 240, kD: 60, kLayout: "straight", kLower: 4, kUpper: 4, kTall: false, kIsland: false,
+  kW: 360, kH: 270, kD: 60, roomL: 320, kLayout: "straight", kLower: 4, kUpper: 4, kTall: false, kIsland: false,
   kUnits: defaultKUnits(), selectedUnit: null,
   dW: 140, dD: 70, dH: 74, dShape: "straight", dDrawers: 2, dShelves: 1, dSide: false, dCable: true, dMonitor: false, dKeyboard: false,
   wood: "oak", gloss: false, handle: "bar", hardware: "premium", doorStyle: "shaker", led: false,
@@ -287,7 +287,7 @@ function Preview3D({ config, lang, snapRef, onPickUnit, onReorder }) {
   propsRef.current = { config, onPickUnit, onReorder };
 
   const geoSig = useMemo(() => {
-    const k = ["product", "kW", "kH", "kD", "kLayout", "kUpper", "kTall", "kIsland", "dW", "dD", "dH", "dShape", "dDrawers", "dShelves", "dSide", "dCable", "dMonitor", "dKeyboard", "wood", "gloss", "counter", "backsplash", "deskTop", "leg", "fridge", "microwave", "openShelf", "pantry", "closed", "cpu", "printer", "fileCab", "cableHole", "grommet", "doorStyle", "led"];
+    const k = ["product", "kW", "kH", "kD", "roomL", "kLayout", "kUpper", "kTall", "kIsland", "dW", "dD", "dH", "dShape", "dDrawers", "dShelves", "dSide", "dCable", "dMonitor", "dKeyboard", "wood", "gloss", "counter", "backsplash", "deskTop", "leg", "fridge", "microwave", "openShelf", "pantry", "closed", "cpu", "printer", "fileCab", "cableHole", "grommet", "doorStyle", "led"];
     return k.map((x) => config[x]).join("|") + "|" + JSON.stringify(config.kUnits || []) + "|" + (config.selectedUnit || "");
   }, [config]);
 
@@ -454,36 +454,22 @@ function Preview3D({ config, lang, snapRef, onPickUnit, onReorder }) {
     const model = new THREE.Group();
     if (config.product === "kitchen") buildKitchen(model, config);
     else buildDesk(model, config);
-
-    const bbox = new THREE.Box3().setFromObject(model);
-    const center = bbox.getCenter(new THREE.Vector3());
-    const size = bbox.getSize(new THREE.Vector3());
-    model.position.x -= center.x;
-    model.position.z -= center.z;
     s.scene.add(model);
     s.model = model;
 
-    // room backdrop (floor + corner walls), sized to the model and excluded from framing
-    if (s.room) { s.scene.remove(s.room); disposeGroup(s.room); }
-    const room = new THREE.Group();
-    const wallH = Math.max(size.y + 0.35, 2.5);
-    const fW = size.x + 2.4, fD = size.z + 2.4;
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(fW + 6, fD + 6), new THREE.MeshStandardMaterial({ color: 0xE6DDCD, roughness: 0.96, metalness: 0 }));
-    floor.rotation.x = -Math.PI / 2; floor.position.y = -0.004; floor.receiveShadow = true; room.add(floor);
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0xF1ECE3, roughness: 1, metalness: 0 });
-    const backWall = new THREE.Mesh(new THREE.PlaneGeometry(fW, wallH), wallMat);
-    backWall.position.set(0, wallH / 2, -size.z / 2 - 0.06); backWall.receiveShadow = true; room.add(backWall);
-    const sideWall = new THREE.Mesh(new THREE.PlaneGeometry(fD, wallH), wallMat);
-    sideWall.rotation.y = Math.PI / 2; sideWall.position.set(-size.x / 2 - 0.06, wallH / 2, 0); sideWall.receiveShadow = true; room.add(sideWall);
-    s.scene.add(room); s.room = room;
-
-    const maxDim = Math.max(size.x, size.y, size.z);
-    // keep the user's orbit on material/dimension tweaks; only re-frame
-    // when switching product or when the model no longer fits the view.
+    // framing: builders attach a focus (room centre + radius); fall back to bbox
+    let focus = model.userData.focus;
+    if (!focus) {
+      const bbox = new THREE.Box3().setFromObject(model);
+      const c = bbox.getCenter(new THREE.Vector3()), sz = bbox.getSize(new THREE.Vector3());
+      focus = { cx: c.x, cy: sz.y / 2, cz: c.z, radius: Math.max(2.6, Math.max(sz.x, sz.y, sz.z) * 1.7) };
+    }
+    // keep the user's orbit on small tweaks; only re-frame on product switch
+    // or when the scene no longer fits the view.
     const productChanged = s.lastProduct !== config.product;
-    const fitR = Math.max(2.6, maxDim * 1.7);
-    s.target.set(0, size.y / 2, 0);
-    if (productChanged || s.radius < fitR * 0.55 || s.radius > fitR * 1.8) s.radius = fitR;
+    const fitR = focus.radius;
+    s.target.set(focus.cx, focus.cy, focus.cz);
+    if (productChanged || s.radius < fitR * 0.5 || s.radius > fitR * 1.9) s.radius = fitR;
     s.lastProduct = config.product;
     s.updateCam && s.updateCam();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -685,6 +671,12 @@ function UnitBuilder({ cfg, lang, uctl }) {
           </div>
           <Pills lang={lang} value={sel.kind} onChange={(v) => uctl.update(sel.id, { kind: v, w: unitKind(v).def })} items={UNIT_KINDS} />
           <Range label={tt("Width", "العرض")} value={sel.w} min={unitKind(sel.kind).min} max={unitKind(sel.kind).max} unit={tt("cm", "سم")} onChange={(v) => uctl.update(sel.id, { w: v })} />
+          {sel.kind === "drawers" && (
+            <Counter label={tt("Number of drawers", "عدد الأدراج")} value={sel.drawers || 3} min={1} max={6} onChange={(v) => uctl.update(sel.id, { drawers: v })} />
+          )}
+          {(sel.kind === "open" || sel.kind === "door") && (
+            <Counter label={tt("Number of shelves", "عدد الرفوف")} value={sel.shelves || 2} min={1} max={5} onChange={(v) => uctl.update(sel.id, { shelves: v })} />
+          )}
           <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
             <button onClick={() => uctl.reorder(sel.id, -1)} style={miniBtn}>← {tt("Move", "تحريك")}</button>
             <button onClick={() => uctl.reorder(sel.id, 1)} style={miniBtn}>{tt("Move", "تحريك")} →</button>
@@ -779,7 +771,7 @@ export default function App() {
     <Shell lang={lang} setLang={setLang} dir={dir} step={step} totalSteps={totalSteps} onSave={saveDesign}>
       <div style={{ display: "flex", flexDirection: "column-reverse", gap: 26 }} className="cfg-grid">
         {/* CONTROLS */}
-        <div style={{ flex: "1 1 36%", minWidth: 0 }} className="cfg-controls">
+        <div style={{ flex: "1 1 31%", minWidth: 300, maxWidth: 470 }} className="cfg-controls">
           <div style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: 6, padding: "clamp(22px,3.5vw,36px)" }}>
             {step === 0 && <StepProduct cfg={cfg} set={set} t={t} lang={lang} />}
             {step === 1 && <StepDimensions cfg={cfg} set={set} t={t} lang={lang} isK={isK} uctl={uctl} />}
@@ -800,7 +792,7 @@ export default function App() {
         </div>
 
         {/* PREVIEW + SUMMARY */}
-        <div style={{ flex: "1 1 64%", minWidth: 0 }} className="cfg-preview">
+        <div style={{ flex: "1 1 69%", minWidth: 0 }} className="cfg-preview">
           <div className="cfg-sticky">
             <div className="cfg-stage" style={{ position: "relative", aspectRatio: "4 / 3.6", border: `1px solid ${C.line}`, borderRadius: 6, overflow: "hidden", marginBottom: 16, boxShadow: "0 20px 50px -34px rgba(62,44,30,.55)" }}>
               <Preview3D config={cfg} lang={lang} snapRef={snapRef} onPickUnit={uctl.select} onReorder={uctl.reorder} />
@@ -856,11 +848,11 @@ function StepDimensions({ cfg, set, t, lang, isK, uctl }) {
       <SectionTitle lang={lang}>{t("dims")}</SectionTitle>
       {isK ? (
         <>
-          <Range label={t("width")} value={cfg.kW} min={180} max={600} unit={t("cm")} onChange={set("kW")} />
-          <Range label={t("height")} value={cfg.kH} min={200} max={300} unit={t("cm")} onChange={set("kH")} />
-          <Range label={t("depth")} value={cfg.kD} min={55} max={70} unit={t("cm")} onChange={set("kD")} />
-          <FieldLabel>{t("layout")}</FieldLabel>
-          <Pills lang={lang} value={cfg.kLayout} onChange={set("kLayout")} items={[{ id: "straight", l: L("Straight", "مستقيم") }, { id: "l", l: L("L-shape", "حرف L") }, { id: "u", l: L("U-shape", "حرف U") }]} />
+          <FieldLabel>{L("The room", "الغرفة")[lang]}</FieldLabel>
+          <Range label={L("Wall width", "عرض الحيطة")[lang]} value={cfg.kW} min={180} max={720} unit={t("cm")} onChange={set("kW")} />
+          <Range label={L("Room depth", "عمق الغرفة")[lang]} value={cfg.roomL} min={200} max={600} unit={t("cm")} onChange={set("roomL")} />
+          <Range label={L("Room height", "ارتفاع الغرفة")[lang]} value={cfg.kH} min={220} max={330} unit={t("cm")} onChange={set("kH")} />
+          <Range label={L("Cabinet depth", "عمق الخزائن")[lang]} value={cfg.kD} min={50} max={70} unit={t("cm")} onChange={set("kD")} />
           <UnitBuilder cfg={cfg} lang={lang} uctl={uctl} />
           <div style={{ marginTop: 18 }}>
             <Counter label={t("upperCab")} value={cfg.kUpper} min={0} max={10} onChange={set("kUpper")} />
