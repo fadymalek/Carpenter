@@ -185,7 +185,13 @@ const UNIT_KINDS = [
   { id: "oven", l: L("Oven + hob", "فرن + بوتاجاز"), icon: "▦", min: 50, max: 90, def: 60 },
   { id: "dishwasher", l: L("Dishwasher", "غسالة أطباق"), icon: "◫", min: 45, max: 60, def: 60 },
 ];
-const unitKind = (id) => UNIT_KINDS.find((k) => k.id === id) || UNIT_KINDS[0];
+const DESK_KINDS = [
+  { id: "drawers", l: L("Drawers", "أدراج"), icon: "≣", min: 35, max: 70, def: 45 },
+  { id: "open", l: L("Open shelves", "رفوف مفتوحة"), icon: "▭", min: 35, max: 90, def: 50 },
+  { id: "door", l: L("Door cabinet", "خزانة باب"), icon: "▯", min: 35, max: 90, def: 50 },
+  { id: "file", l: L("File cabinet", "خزانة ملفات"), icon: "◫", min: 35, max: 55, def: 45 },
+];
+const unitKind = (id) => UNIT_KINDS.find((k) => k.id === id) || DESK_KINDS.find((k) => k.id === id) || UNIT_KINDS[0];
 const makeUnit = (kind = "door") => ({ id: uid(), kind, w: unitKind(kind).def, shelves: 2, drawers: 3 });
 const defaultKUnits = () => [
   makeUnit("drawers"), makeUnit("sink"), makeUnit("door"), makeUnit("oven"), makeUnit("drawers"),
@@ -223,6 +229,7 @@ const DEFAULTS = {
   kW: 360, kH: 270, kD: 60, roomL: 320, kLayout: "straight", kLower: 4, kUpper: 4, kTall: false, kIsland: false,
   kUnits: defaultKUnits(), selectedUnit: null,
   dW: 140, dD: 70, dH: 74, dShape: "straight", dDrawers: 2, dShelves: 1, dSide: false, dCable: true, dMonitor: false, dKeyboard: false,
+  dUnits: [],
   wood: "oak", gloss: false, handle: "bar", hardware: "premium", doorStyle: "shaker", led: false,
   counter: "quartzw", backsplash: "tile",
   deskTop: "oak", leg: "timber",
@@ -246,10 +253,12 @@ function priceRange(cfg) {
     p += { quartzw: 4000, granite: 6000, butcher: 3000, marble: 9000, concrete: 3500 }[cfg.counter] || 0;
     p += { shaker: 0, flat: 600, slab: 1200, glass: 2400 }[cfg.doorStyle] || 0;
   } else {
-    p = 4000 + 5000 * (cfg.dW / 100) + 1500 * cfg.dDrawers + 900 * cfg.dShelves;
-    p += (cfg.dSide ? 3500 : 0) + (cfg.dMonitor ? 900 : 0) + (cfg.dKeyboard ? 700 : 0);
-    p += (cfg.fileCab ? 2500 : 0) + (cfg.closed ? 2000 : 0) + (cfg.printer ? 900 : 0);
-    p += { timber: 0, panel: 1500, steel: 1200, pedestal: 3000 }[cfg.leg] || 0;
+    const du = cfg.dUnits || [];
+    const perMod = { drawers: 2400, open: 1100, door: 1600, file: 2600 };
+    p = 4500 + 4200 * (cfg.dW / 100);
+    p += du.reduce((a, u) => a + (perMod[u.kind] || 1600), 0);
+    p += (cfg.dMonitor ? 900 : 0) + (cfg.dKeyboard ? 700 : 0) + (cfg.dCable ? 400 : 0);
+    p += (cfg.dShape === "l" ? 2500 : cfg.dShape === "exec" ? 3500 : 0);
     p += { shaker: 0, flat: 400, slab: 800, glass: 1600 }[cfg.doorStyle] || 0;
   }
   if (cfg.gloss) p *= 1.06;
@@ -288,7 +297,7 @@ function Preview3D({ config, lang, snapRef, onPickUnit, onReorder }) {
 
   const geoSig = useMemo(() => {
     const k = ["product", "kW", "kH", "kD", "roomL", "kLayout", "kUpper", "kTall", "kIsland", "dW", "dD", "dH", "dShape", "dDrawers", "dShelves", "dSide", "dCable", "dMonitor", "dKeyboard", "wood", "gloss", "counter", "backsplash", "deskTop", "leg", "fridge", "microwave", "openShelf", "pantry", "closed", "cpu", "printer", "fileCab", "cableHole", "grommet", "doorStyle", "led"];
-    return k.map((x) => config[x]).join("|") + "|" + JSON.stringify(config.kUnits || []) + "|" + (config.selectedUnit || "");
+    return k.map((x) => config[x]).join("|") + "|" + JSON.stringify(config.kUnits || []) + "|" + JSON.stringify(config.dUnits || []) + "|" + (config.selectedUnit || "");
   }, [config]);
 
   // init once
@@ -604,13 +613,15 @@ function UnitThumb({ kind }) {
     sink: (<>{body}<ellipse cx="25" cy="15" rx="13" ry="6" fill={steel} stroke={ln} strokeWidth="1" /><path d="M25 9 v-3 h4" fill="none" stroke={dk} strokeWidth="1.4" /><line x1="25" y1="27" x2="25" y2="50" stroke={ln} strokeWidth="1" /></>),
     oven: (<>{body}<rect x="10" y="5" width="30" height="4" rx="1" fill={dk} /><rect x="7" y="11" width="36" height="23" rx="2" fill={glass} stroke={dk} strokeWidth="1" /><rect x="14" y="37" width="22" height="11" rx="1.5" fill="none" stroke={ln} strokeWidth="1" /></>),
     dishwasher: (<>{body}<rect x="8" y="5" width="34" height="4" rx="1" fill={dk} /><rect x="6" y="11" width="38" height="38" rx="2" fill="none" stroke={ln} strokeWidth="1" /><circle cx="12" cy="7" r="1" fill="#9AAE9A" /></>),
+    file: (<>{body}{[18, 38].map((y) => (<g key={y}><rect x="6" y={y - 11} width="38" height="20" rx="1.5" fill="none" stroke={ln} strokeWidth="1" /><rect x="18" y={y - 3} width="14" height="2.4" rx="1" fill={dk} /></g>))}</>),
   };
   return <svg viewBox="0 0 50 56" width="100%" height="44" style={{ display: "block" }}>{parts[kind] || parts.door}</svg>;
 }
 
-function UnitBuilder({ cfg, lang, uctl }) {
+function UnitBuilder({ cfg, lang, uctl, kinds = UNIT_KINDS, labels }) {
   const tt = (en, ar) => (lang === "ar" ? ar : en);
-  const units = cfg.kUnits || [];
+  const L0 = labels || { title: tt("Cabinet layout — box by box", "بناء الخزائن — حتة حتة"), cat: tt("Cabinet catalogue", "كتالوج الخزائن"), empty: tt("Add your first cabinet below.", "أضف أول خزانة من تحت."), sel: tt("Selected cabinet", "الخزانة المختارة") };
+  const units = uctl.units || [];
   const total = units.reduce((a, u) => a + (u.w || 60), 0) || 1;
   const sel = units.find((u) => u.id === cfg.selectedUnit);
   const drag = useRef({ from: null });
@@ -618,14 +629,14 @@ function UnitBuilder({ cfg, lang, uctl }) {
 
   return (
     <div style={{ marginTop: 8 }}>
-      <FieldLabel>{tt("Cabinet layout — box by box", "بناء الخزائن — حتة حتة")}</FieldLabel>
+      <FieldLabel>{L0.title}</FieldLabel>
       <p style={{ fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 13.5, color: C.muted, marginTop: -6, marginBottom: 12, lineHeight: 1.5 }}>
         {tt("Tap a box to edit it · drag to reorder · or drag the highlighted box inside the 3D view.", "دوس على صندوق لتعديله · اسحبه لإعادة الترتيب · أو اسحب الصندوق المظلّل جوّه مشهد الـ 3D.")}
       </p>
 
       {/* top-down lane (2D plan) */}
-      <div style={{ display: "flex", gap: 4, border: `1px solid ${C.line}`, background: C.cream, borderRadius: 8, padding: 8, overflowX: "auto" }}>
-        {units.length === 0 && <span style={{ fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 13, color: C.muted, padding: "20px 12px" }}>{tt("Add your first cabinet below.", "أضف أول خزانة من تحت.")}</span>}
+      <div style={{ display: "flex", gap: 4, border: `1px solid ${C.line}`, background: C.cream, borderRadius: 8, padding: 8, overflowX: "auto", minHeight: 92 }}>
+        {units.length === 0 && <span style={{ fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 13, color: C.muted, padding: "32px 12px", margin: "0 auto" }}>{L0.empty}</span>}
         {units.map((u, i) => {
           const k = unitKind(u.kind); const active = u.id === cfg.selectedUnit;
           return (
@@ -643,12 +654,12 @@ function UnitBuilder({ cfg, lang, uctl }) {
         })}
       </div>
 
-      {/* catalogue: pick a cabinet to add */}
+      {/* catalogue: pick a box to add */}
       <div style={{ fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 12, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: C.oakDeep, margin: "18px 0 10px" }}>
-        {tt("Cabinet catalogue", "كتالوج الخزائن")}
+        {L0.cat}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))", gap: 10 }}>
-        {UNIT_KINDS.map((k) => (
+        {kinds.map((k) => (
           <div key={k.id} style={{ border: `1px solid ${C.line}`, borderRadius: 10, background: C.paper, padding: "10px 10px 11px", display: "flex", flexDirection: "column", alignItems: "center", gap: 7 }}>
             <div style={{ width: "100%", background: C.cream, borderRadius: 6, padding: "7px 12px" }}><UnitThumb kind={k.id} /></div>
             <span style={{ fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 12, fontWeight: 600, color: C.walnutDark, textAlign: "center", lineHeight: 1.25, minHeight: 30, display: "flex", alignItems: "center" }}>{k.l[lang]}</span>
@@ -664,12 +675,12 @@ function UnitBuilder({ cfg, lang, uctl }) {
       {sel && (
         <div style={{ marginTop: 14, border: `1.5px solid ${C.oak}`, borderRadius: 8, padding: "16px 18px", background: "rgba(176,121,74,.06)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <span style={{ fontFamily: "'Fraunces',serif", fontSize: 18, color: C.walnutDark }}>{tt("Selected cabinet", "الخزانة المختارة")}</span>
+            <span style={{ fontFamily: "'Fraunces',serif", fontSize: 18, color: C.walnutDark }}>{L0.sel}</span>
             <button onClick={() => uctl.remove(sel.id)} style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, color: "#A23B2E", background: "none", border: "none", fontFamily: "'Hanken Grotesk',sans-serif", fontWeight: 600, fontSize: 13 }}>
               <Trash2 size={15} /> {tt("Remove", "حذف")}
             </button>
           </div>
-          <Pills lang={lang} value={sel.kind} onChange={(v) => uctl.update(sel.id, { kind: v, w: unitKind(v).def })} items={UNIT_KINDS} />
+          <Pills lang={lang} value={sel.kind} onChange={(v) => uctl.update(sel.id, { kind: v, w: unitKind(v).def })} items={kinds} />
           <Range label={tt("Width", "العرض")} value={sel.w} min={unitKind(sel.kind).min} max={unitKind(sel.kind).max} unit={tt("cm", "سم")} onChange={(v) => uctl.update(sel.id, { w: v })} />
           {sel.kind === "drawers" && (
             <Counter label={tt("Number of drawers", "عدد الأدراج")} value={sel.drawers || 3} min={1} max={6} onChange={(v) => uctl.update(sel.id, { drawers: v })} />
@@ -716,16 +727,18 @@ export default function App() {
   const isK = cfg.product === "kitchen";
   const price = priceRange(cfg);
 
-  // modular cabinet controller (shared by the list, the 2D lane and the 3D scene)
+  // modular unit controller — works for the active product (kitchen or desk),
+  // shared by the catalogue, the 2D lane and the 3D scene
+  const uField = isK ? "kUnits" : "dUnits";
   const uctl = {
-    units: cfg.kUnits || [],
+    units: cfg[uField] || [],
     selected: cfg.selectedUnit,
     select: (id) => setCfg((c) => ({ ...c, selectedUnit: c.selectedUnit === id ? null : id })),
-    add: (kind) => setCfg((c) => ({ ...c, kUnits: [...(c.kUnits || []), makeUnit(kind)], selectedUnit: null })),
-    remove: (id) => setCfg((c) => ({ ...c, kUnits: (c.kUnits || []).filter((x) => x.id !== id), selectedUnit: c.selectedUnit === id ? null : c.selectedUnit })),
-    update: (id, patch) => setCfg((c) => ({ ...c, kUnits: (c.kUnits || []).map((x) => (x.id === id ? { ...x, ...patch } : x)) })),
-    move: (from, to) => setCfg((c) => { const u = [...(c.kUnits || [])]; if (from < 0 || to < 0 || from >= u.length || to >= u.length) return c; const [m] = u.splice(from, 1); u.splice(to, 0, m); return { ...c, kUnits: u }; }),
-    reorder: (id, dir2) => setCfg((c) => { const u = [...(c.kUnits || [])]; const i = u.findIndex((x) => x.id === id); const j = i + dir2; if (i < 0 || j < 0 || j >= u.length) return c; [u[i], u[j]] = [u[j], u[i]]; return { ...c, kUnits: u }; }),
+    add: (kind) => setCfg((c) => ({ ...c, [uField]: [...(c[uField] || []), makeUnit(kind)], selectedUnit: null })),
+    remove: (id) => setCfg((c) => ({ ...c, [uField]: (c[uField] || []).filter((x) => x.id !== id), selectedUnit: c.selectedUnit === id ? null : c.selectedUnit })),
+    update: (id, patch) => setCfg((c) => ({ ...c, [uField]: (c[uField] || []).map((x) => (x.id === id ? { ...x, ...patch } : x)) })),
+    move: (from, to) => setCfg((c) => { const u = [...(c[uField] || [])]; if (from < 0 || to < 0 || from >= u.length || to >= u.length) return c; const [m] = u.splice(from, 1); u.splice(to, 0, m); return { ...c, [uField]: u }; }),
+    reorder: (id, dir2) => setCfg((c) => { const u = [...(c[uField] || [])]; const i = u.findIndex((x) => x.id === id); const j = i + dir2; if (i < 0 || j < 0 || j >= u.length) return c; [u[i], u[j]] = [u[j], u[i]]; return { ...c, [uField]: u }; }),
   };
 
   const totalSteps = STR.steps.length;
@@ -864,17 +877,20 @@ function StepDimensions({ cfg, set, t, lang, isK, uctl }) {
         </>
       ) : (
         <>
-          <Range label={t("width")} value={cfg.dW} min={100} max={220} unit={t("cm")} onChange={set("dW")} />
+          <FieldLabel>{L("The desk", "المكتب")[lang]}</FieldLabel>
+          <Range label={L("Min width", "أقل عرض")[lang]} value={cfg.dW} min={100} max={300} unit={t("cm")} onChange={set("dW")} />
           <Range label={t("depth")} value={cfg.dD} min={55} max={90} unit={t("cm")} onChange={set("dD")} />
           <Range label={t("height")} value={cfg.dH} min={68} max={80} unit={t("cm")} onChange={set("dH")} />
           <FieldLabel>{t("deskShape")}</FieldLabel>
           <Pills lang={lang} value={cfg.dShape} onChange={set("dShape")} items={[{ id: "straight", l: L("Straight", "مستقيم") }, { id: "l", l: L("L-shape", "حرف L") }, { id: "exec", l: L("Executive", "تنفيذي") }]} />
-          <div style={{ marginTop: 18 }}>
-            <Counter label={t("drawers")} value={cfg.dDrawers} min={0} max={6} onChange={set("dDrawers")} />
-            <Counter label={t("shelves")} value={cfg.dShelves} min={0} max={6} onChange={set("dShelves")} />
-          </div>
+          <UnitBuilder cfg={cfg} lang={lang} uctl={uctl} kinds={DESK_KINDS}
+            labels={{
+              title: L("Desk modules — box by box", "وحدات المكتب — حتة حتة")[lang],
+              cat: L("Module catalogue", "كتالوج الوحدات")[lang],
+              empty: L("Empty desk. Add a module from the catalogue below.", "مكتب فاضي. أضف وحدة من الكتالوج تحت.")[lang],
+              sel: L("Selected module", "الوحدة المختارة")[lang],
+            }} />
           <div style={{ display: "grid", gap: 12, marginTop: 18 }}>
-            <Toggle label={t("sideUnit")} value={cfg.dSide} onChange={set("dSide")} />
             <Toggle label={t("cableMgmt")} value={cfg.dCable} onChange={set("dCable")} />
             <Toggle label={t("monitorShelf")} value={cfg.dMonitor} onChange={set("dMonitor")} />
             <Toggle label={t("keyboardTray")} value={cfg.dKeyboard} onChange={set("dKeyboard")} />
@@ -966,7 +982,7 @@ function rowsFor(cfg, lang, isK, t) {
     base.push([STR.countertop[lang], COUNTERS.find((x) => x.id === cfg.counter).l[lang]]);
   } else {
     base.push([STR.deskShape[lang], { straight: "Straight", l: "L-shape", exec: "Executive" }[cfg.dShape]]);
-    base.push([STR.drawers[lang] + " / " + STR.shelves[lang], `${cfg.dDrawers} / ${cfg.dShelves}`]);
+    base.push([L("Modules", "الوحدات")[lang], `${(cfg.dUnits || []).length}`]);
     base.push([STR.deskTop[lang], DESKTOPS.find((x) => x.id === cfg.deskTop).l[lang]]);
   }
   return base;
@@ -1060,7 +1076,7 @@ function SummaryPanel({ cfg, t, lang, isK, price }) {
         <span style={{ fontFamily: "'Fraunces',serif", fontSize: 19, color: C.walnutDark }}>{isK ? t("kitchen") : t("desk")}</span>
       </div>
       <div style={{ fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 14, color: C.muted, lineHeight: 1.7, marginBottom: 12 }}>
-        {isK ? `${cfg.kW}×${cfg.kH}×${cfg.kD} ${t("cm")} · ${(cfg.kUnits || []).length}+${cfg.kUpper}` : `${cfg.dW}×${cfg.dD}×${cfg.dH} ${t("cm")} · ${cfg.dDrawers}${L(" drawers", " أدراج")[lang]}`}
+        {isK ? `${cfg.kW}×${cfg.kH}×${cfg.kD} ${t("cm")} · ${(cfg.kUnits || []).length}+${cfg.kUpper}` : `${cfg.dW}×${cfg.dD}×${cfg.dH} ${t("cm")} · ${(cfg.dUnits || []).length} ${L("modules", "وحدة")[lang]}`}
       </div>
       {feats.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>

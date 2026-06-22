@@ -286,8 +286,8 @@ function addBaseUnit(ug, o) {
   const { kind, w, D, bodyH, baseY, topY, woodC, gloss, handle, lowerStyle, counterC, stone, shelves, drawers } = o;
   addCarcass(ug, w, D, bodyH, baseY, woodC, { gloss });
   const fz = D;
-  if (kind === "drawers") {
-    const n = Math.max(1, Math.min(6, drawers || (bodyH > 0.7 ? 4 : 3))), fh = (bodyH - 0.02) / n;
+  if (kind === "drawers" || kind === "file") {
+    const n = kind === "file" ? 2 : Math.max(1, Math.min(6, drawers || (bodyH > 0.7 ? 4 : 3))), fh = (bodyH - 0.02) / n;
     for (let i = 0; i < n; i++) addDoor(ug, w - 0.01, fh - 0.012, 0, baseY + 0.01 + fh / 2 + i * fh, fz, woodC, { gloss }, handle, false, lowerStyle);
   } else if (kind === "open") {
     const n = Math.max(1, Math.min(5, shelves || 2));
@@ -541,9 +541,12 @@ export function buildKitchen(model, cfg) {
   model.userData.focus = { cx: RW / 2, cy: RH * 0.45, cz: RL * 0.5, radius: Math.max(RW, RL, RH) * 1.15 + 0.5 };
 }
 
-/* ============================ DESK ============================ */
+/* default desk starts empty (a bare top on legs) — modules are added one by one */
+export function defaultDeskUnits() { return []; }
+
+/* ============================ DESK (modular) ============================ */
 export function buildDesk(model, cfg) {
-  const W = cfg.dW / 100, D = cfg.dD / 100, H = cfg.dH / 100;
+  const D = cfg.dD / 100, H = cfg.dH / 100;
   const topC = TOP[cfg.deskTop] || TOP.oak;
   const woodC = WOOD[cfg.wood] || WOOD.oak;
   const gloss = cfg.gloss;
@@ -551,126 +554,74 @@ export function buildDesk(model, cfg) {
   const dStyle = cfg.doorStyle || "shaker";
   const dLower = dStyle === "glass" ? "shaker" : dStyle;
   const topT = isExec ? 0.055 : 0.04;
-  const legH = H - topT;
+  const bodyH = H - topT;
+  const handle = cfg.handle;
 
-  // top + slim edge band
-  put(model, box(W, topT, D, topC, { gloss }), 0, H - topT / 2, 0);
-  put(model, box(W + 0.004, 0.012, D + 0.004, topC, { gloss }), 0, H - topT, 0);
+  const units = cfg.dUnits || [];
+  const sumW = units.reduce((a, u) => a + (u.w || 45), 0) / 100;
+  const topW = Math.max(sumW + (units.length ? 0.12 : 0), (cfg.dW || 140) / 100);
 
-  // apron rails under the top (a built, solid look) for timber / panel / pedestal bases
-  if (cfg.leg === "timber" || cfg.leg === "panel" || cfg.leg === "pedestal" || isExec) {
-    const ay = H - topT - 0.05;
-    put(model, box(W - 0.16, 0.08, 0.025, woodC, { gloss }), 0, ay, -(D / 2) + 0.05);          // back apron
-    put(model, box(0.025, 0.08, D - 0.16, woodC, { gloss }), -(W / 2) + 0.05, ay, 0);           // left apron
-    put(model, box(0.025, 0.08, D - 0.16, woodC, { gloss }), (W / 2) - 0.05, ay, 0);            // right apron
-  }
+  // top + slim edge band (centred at origin)
+  put(model, box(topW, topT, D, topC, { gloss }), 0, H - topT / 2, 0);
+  put(model, box(topW + 0.004, 0.012, D + 0.004, topC, { gloss }), 0, H - topT, 0);
 
-  // base / legs
-  if (cfg.leg === "timber" || isExec) {
-    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => {
-      put(model, box(0.06, legH, 0.06, woodC, { gloss }), sx * (W / 2 - 0.07), legH / 2, sz * (D / 2 - 0.07));
-    });
-    // stretcher rails for a built feel
-    put(model, box(W - 0.18, 0.04, 0.04, woodC, { gloss }), 0, 0.12, -(D / 2 - 0.07));
-    put(model, box(0.04, 0.04, D - 0.18, woodC, { gloss }), -(W / 2 - 0.07), 0.12, 0);
-    put(model, box(0.04, 0.04, D - 0.18, woodC, { gloss }), (W / 2 - 0.07), 0.12, 0);
-  } else if (cfg.leg === "panel") {
-    [-1, 1].forEach((sx) => put(model, box(0.04, legH - 0.02, D - 0.06, woodC, { gloss }), sx * (W / 2 - 0.02), (legH - 0.02) / 2, 0));
-    put(model, box(W - 0.1, legH * 0.5, 0.04, woodC, { gloss }), 0, legH * 0.35, -(D / 2) + 0.05);
-  } else if (cfg.leg === "steel") {
-    // flat-bar inverted-U legs each end
-    [-1, 1].forEach((sx) => {
-      const lx = sx * (W / 2 - 0.06);
-      put(model, box(0.03, legH, 0.05, "#2C2C2E", { metal: true }), lx, legH / 2, D / 2 - 0.07);
-      put(model, box(0.03, legH, 0.05, "#2C2C2E", { metal: true }), lx, legH / 2, -(D / 2 - 0.07));
-      put(model, box(0.03, 0.04, D - 0.1, "#2C2C2E", { metal: true }), lx, legH - 0.04, 0);
-    });
-  } else if (cfg.leg === "pedestal") {
-    [-1, 1].forEach((sx) => put(model, box(0.42, legH, D - 0.06, woodC, { gloss }), sx * (W / 2 - 0.23), legH / 2, 0));
-  }
+  // four corner legs + back apron
+  [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => {
+    put(model, box(0.06, bodyH, 0.06, woodC, { gloss }), sx * (topW / 2 - 0.06), bodyH / 2, sz * (D / 2 - 0.07));
+  });
+  put(model, box(topW - 0.16, 0.08, 0.025, woodC, { gloss }), 0, H - topT - 0.05, -(D / 2) + 0.05);
 
-  // RIGHT pedestal: drawers with reveals + handles
-  if (cfg.dDrawers > 0) {
-    const pw = 0.42, ph = legH, px = W / 2 - 0.23, pd = D - 0.06;
-    put(model, box(pw, ph, pd, woodC, { gloss }), px, ph / 2, 0);
-    const n = cfg.dDrawers, fh = (ph - 0.02) / n;
-    for (let i = 0; i < n; i++) {
-      const y = 0.01 + fh / 2 + i * fh;
-      put(model, box(pw - 0.03, fh - 0.016, 0.02, woodC, { gloss }), px, y, pd / 2 + 0.012);
-      put(model, box(0.13, 0.016, 0.024, HANDLE_DK, { metal: true }), px, y, pd / 2 + 0.026);
+  // pedestal modules laid left -> right under the top, each pickable
+  let cursor = -sumW / 2;
+  units.forEach((u, i) => {
+    const uw = (u.w || 45) / 100;
+    const ug = new THREE.Group();
+    ug.position.set(cursor + uw / 2, 0, 0);
+    ug.userData = { unitId: u.id, unitIndex: i, pickable: true };
+    addBaseUnit(ug, { kind: u.kind, w: uw - 0.01, D: D - 0.02, bodyH, baseY: 0, topY: H, woodC, gloss, handle, lowerStyle: dLower, counterC: null, stone: false, shelves: u.shelves, drawers: u.drawers });
+    if (cfg.selectedUnit && u.id === cfg.selectedUnit) {
+      const eg = new THREE.EdgesGeometry(new THREE.BoxGeometry(uw - 0.01 + 0.02, bodyH + 0.04, D + 0.02));
+      const ls = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0xB0794A }));
+      ls.position.set(0, bodyH / 2, (D - 0.02) / 2);
+      ug.add(ls);
     }
-  }
-
-  // LEFT slot (priority: file > closed > shelves > cpu)
-  const leftKind = cfg.fileCab ? "file" : cfg.closed ? "closed" : cfg.dShelves > 0 ? "shelves" : cfg.cpu ? "cpu" : isExec ? "closed" : null;
-  if (leftKind) {
-    const pw = 0.42, ph = legH, px = -(W / 2 - 0.23), pd = D - 0.06;
-    if (leftKind === "shelves" || leftKind === "cpu") {
-      [-1, 1].forEach((s) => put(model, box(0.02, ph, pd, woodC, { gloss }), px + s * (pw / 2), ph / 2, 0));
-      put(model, box(pw, 0.02, pd, woodC, { gloss }), px, 0.01, 0);
-      put(model, box(pw, 0.02, pd, woodC, { gloss }), px, ph, 0);
-      const nb = leftKind === "shelves" ? Math.max(1, cfg.dShelves) : 1;
-      for (let i = 1; i <= nb; i++) put(model, box(pw - 0.02, 0.02, pd - 0.02, woodC, { gloss }), px, (ph / (nb + 1)) * i, 0);
-    } else {
-      put(model, box(pw, ph, pd, woodC, { gloss }), px, ph / 2, 0);
-      const fronts = leftKind === "file" ? 2 : 1, fh = (ph - 0.02) / fronts;
-      for (let i = 0; i < fronts; i++) {
-        const y = 0.01 + fh / 2 + i * fh;
-        addDoor(model, pw - 0.02, fh - 0.014, px, y, pd / 2 + 0.0, woodC, { gloss }, "bar", false, dLower);
-      }
-    }
-  }
-
-  // extra wall shelves if not used on the left
-  if (cfg.dShelves > 0 && leftKind !== "shelves") {
-    for (let i = 0; i < Math.min(cfg.dShelves, 2); i++)
-      put(model, box(0.5, 0.03, 0.2, woodC, { gloss }), -(W / 2) + 0.3, H + 0.2 + i * 0.24, -(D / 2) + 0.12);
-  }
-
-  // side storage unit (extends left)
-  if (cfg.dSide) {
-    put(model, box(0.4, H, D - 0.04, woodC, { gloss }), -(W / 2 + 0.22), H / 2, 0);
-    addDoor(model, 0.36, H * 0.5, -(W / 2 + 0.22), H * 0.62, (D - 0.04) / 2, woodC, { gloss }, cfg.handle, false, dLower);
-  }
-  if (cfg.printer) put(model, box(0.42, 0.03, 0.32, woodC, { gloss }), -(W / 2 + 0.22), H + 0.02, 0);
+    model.add(ug);
+    cursor += uw;
+  });
 
   // monitor shelf + modelled monitor
   if (cfg.dMonitor) {
-    const mw = Math.min(W * 0.5, 0.74);
+    const mw = Math.min(topW * 0.5, 0.74);
     put(model, box(mw, 0.04, 0.2, topC, { gloss }), 0, H + 0.12, -(D / 2) + 0.16);
     [-1, 1].forEach((s) => put(model, box(0.04, 0.1, 0.04, woodC, { gloss }), s * (mw / 2 - 0.05), H + 0.06, -(D / 2) + 0.16));
-    // simple monitor
     put(model, box(0.5, 0.3, 0.02, DARKGLASS, { glass: true }), 0, H + 0.32, -(D / 2) + 0.2);
     put(model, box(0.08, 0.08, 0.02, "#3A3835", { metal: true }), 0, H + 0.16, -(D / 2) + 0.2);
     put(model, box(0.2, 0.014, 0.1, "#3A3835", { metal: true }), 0, H + 0.155, -(D / 2) + 0.22);
   }
-  // keyboard tray + keyboard
+  // keyboard tray
   if (cfg.dKeyboard) {
-    put(model, box(Math.min(W * 0.5, 0.72), 0.02, 0.28, woodC, { gloss }), 0, H - 0.14, D / 2 - 0.18);
+    put(model, box(Math.min(topW * 0.5, 0.72), 0.02, 0.28, woodC, { gloss }), 0, H - 0.14, D / 2 - 0.18);
     put(model, box(0.42, 0.015, 0.14, "#2A2825", {}), 0, H - 0.125, D / 2 - 0.18);
   }
-
   // executive modesty panel
-  if (isExec) put(model, box(W - 0.2, 0.34, 0.04, woodC, { gloss }), 0, H - topT - 0.2, D / 2 - 0.05);
-
+  if (isExec) put(model, box(topW - 0.2, 0.34, 0.04, woodC, { gloss }), 0, H - topT - 0.2, D / 2 - 0.05);
   // L-shape return with its own leg
   if (cfg.dShape === "l") {
     const rw = 0.75, rd = Math.min(D, 0.6);
-    put(model, box(rw, topT, rd, topC, { gloss }), -(W / 2) + rw / 2, H - topT / 2, D / 2 + rd / 2);
-    put(model, box(0.06, legH, 0.06, woodC, { gloss }), -(W / 2) + 0.07, legH / 2, D / 2 + rd - 0.07);
+    put(model, box(rw, topT, rd, topC, { gloss }), -(topW / 2) + rw / 2, H - topT / 2, D / 2 + rd / 2);
+    put(model, box(0.06, bodyH, 0.06, woodC, { gloss }), -(topW / 2) + 0.07, bodyH / 2, D / 2 + rd - 0.07);
   }
-
   // cable tray + grommet ring
-  if (cfg.dCable) put(model, box(W - 0.22, 0.06, 0.05, "#2A2724", {}), 0, H - 0.13, -(D / 2) + 0.06);
+  if (cfg.dCable) put(model, box(topW - 0.22, 0.06, 0.05, "#2A2724", {}), 0, H - 0.13, -(D / 2) + 0.06);
   if (cfg.grommet || cfg.cableHole) {
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.01, 12, 24), pbr("#201E1C", { metal: true }));
     ring.rotation.x = Math.PI / 2; ring.castShadow = true;
-    put(model, ring, W * 0.3, H - topT + 0.001, -(D / 2) + 0.14);
-    put(model, cyl(0.03, 0.02, "#141312", {}, 16), W * 0.3, H - topT - 0.01, -(D / 2) + 0.14);
+    put(model, ring, topW * 0.3, H - topT + 0.001, -(D / 2) + 0.14);
+    put(model, cyl(0.03, 0.02, "#141312", {}, 16), topW * 0.3, H - topT - 0.01, -(D / 2) + 0.14);
   }
 
-  // room around the desk (floor + back wall), centred on the desk
-  const RW = Math.max(W + 2.0, 3.0), RL = Math.max(D + 2.0, 2.6), RH = Math.max(H + 1.6, 2.5);
+  // room around the desk (floor + corner walls), centred on the desk
+  const RW = Math.max(topW + 2.0, 3.0), RL = Math.max(D + 2.0, 2.6), RH = Math.max(H + 1.6, 2.5);
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(RW + 1, RL + 1), pbr("#E6DDCD"));
   floor.rotation.x = -Math.PI / 2; floor.position.set(0, -0.002, 0); floor.receiveShadow = true; model.add(floor);
   const wallMat = pbr("#EFE9DF");
@@ -679,7 +630,7 @@ export function buildDesk(model, cfg) {
   const side = new THREE.Mesh(new THREE.PlaneGeometry(RL, RH), wallMat);
   side.rotation.y = Math.PI / 2; side.position.set(-(RW / 2), RH / 2, 0); side.receiveShadow = true; model.add(side);
 
-  model.userData.focus = { cx: 0, cy: H * 0.7, cz: 0, radius: Math.max(W, D, H) * 1.9 + 1.0 };
+  model.userData.focus = { cx: 0, cy: H * 0.7, cz: 0, radius: Math.max(topW, D, H) * 1.7 + 1.0 };
 }
 
 /* ---------------- disposal ---------------- */
