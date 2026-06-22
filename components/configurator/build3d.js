@@ -284,6 +284,7 @@ function addCarcass(ug, w, D, bodyH, baseY, col, o) {
 }
 function addBaseUnit(ug, o) {
   const { kind, w, D, bodyH, baseY, topY, woodC, gloss, handle, lowerStyle, counterC, stone, shelves, drawers } = o;
+  if (kind === "gap") return; // empty space / knee gap — reserves width, draws nothing
   addCarcass(ug, w, D, bodyH, baseY, woodC, { gloss });
   const fz = D;
   if (kind === "drawers" || kind === "file") {
