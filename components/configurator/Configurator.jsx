@@ -184,12 +184,14 @@ const UNIT_KINDS = [
   { id: "sink", l: L("Sink", "حوض"), icon: "◠", min: 45, max: 120, def: 90 },
   { id: "oven", l: L("Oven + hob", "فرن + بوتاجاز"), icon: "▦", min: 50, max: 90, def: 60 },
   { id: "dishwasher", l: L("Dishwasher", "غسالة أطباق"), icon: "◫", min: 45, max: 60, def: 60 },
+  { id: "gap", l: L("Empty space", "فراغ"), icon: "⋯", min: 10, max: 150, def: 40 },
 ];
 const DESK_KINDS = [
   { id: "drawers", l: L("Drawers", "أدراج"), icon: "≣", min: 35, max: 70, def: 45 },
   { id: "open", l: L("Open shelves", "رفوف مفتوحة"), icon: "▭", min: 35, max: 90, def: 50 },
   { id: "door", l: L("Door cabinet", "خزانة باب"), icon: "▯", min: 35, max: 90, def: 50 },
   { id: "file", l: L("File cabinet", "خزانة ملفات"), icon: "◫", min: 35, max: 55, def: 45 },
+  { id: "gap", l: L("Knee space", "مساحة رِجل"), icon: "⋯", min: 20, max: 160, def: 60 },
 ];
 const unitKind = (id) => UNIT_KINDS.find((k) => k.id === id) || DESK_KINDS.find((k) => k.id === id) || UNIT_KINDS[0];
 const makeUnit = (kind = "door") => ({ id: uid(), kind, w: unitKind(kind).def, shelves: 2, drawers: 3 });
@@ -614,6 +616,7 @@ function UnitThumb({ kind }) {
     oven: (<>{body}<rect x="10" y="5" width="30" height="4" rx="1" fill={dk} /><rect x="7" y="11" width="36" height="23" rx="2" fill={glass} stroke={dk} strokeWidth="1" /><rect x="14" y="37" width="22" height="11" rx="1.5" fill="none" stroke={ln} strokeWidth="1" /></>),
     dishwasher: (<>{body}<rect x="8" y="5" width="34" height="4" rx="1" fill={dk} /><rect x="6" y="11" width="38" height="38" rx="2" fill="none" stroke={ln} strokeWidth="1" /><circle cx="12" cy="7" r="1" fill="#9AAE9A" /></>),
     file: (<>{body}{[18, 38].map((y) => (<g key={y}><rect x="6" y={y - 11} width="38" height="20" rx="1.5" fill="none" stroke={ln} strokeWidth="1" /><rect x="18" y={y - 3} width="14" height="2.4" rx="1" fill={dk} /></g>))}</>),
+    gap: (<><rect x="3" y="3" width="44" height="50" rx="3.5" fill="none" stroke="#B6AA93" strokeWidth="1.6" strokeDasharray="4 4" /><line x1="25" y1="20" x2="25" y2="36" stroke="#B6AA93" strokeWidth="1.6" /><line x1="17" y1="28" x2="33" y2="28" stroke="#B6AA93" strokeWidth="1.6" /></>),
   };
   return <svg viewBox="0 0 50 56" width="100%" height="44" style={{ display: "block" }}>{parts[kind] || parts.door}</svg>;
 }
@@ -688,10 +691,18 @@ function UnitBuilder({ cfg, lang, uctl, kinds = UNIT_KINDS, labels }) {
           {(sel.kind === "open" || sel.kind === "door") && (
             <Counter label={tt("Number of shelves", "عدد الرفوف")} value={sel.shelves || 2} min={1} max={5} onChange={(v) => uctl.update(sel.id, { shelves: v })} />
           )}
-          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-            <button onClick={() => uctl.reorder(sel.id, -1)} style={miniBtn}>← {tt("Move", "تحريك")}</button>
-            <button onClick={() => uctl.reorder(sel.id, 1)} style={miniBtn}>{tt("Move", "تحريك")} →</button>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button onClick={() => uctl.moveEdge(sel.id, "start")} style={miniBtn} title={tt("To the start edge", "لأول الطرف")}>⇤ {tt("Edge", "الطرف")}</button>
+            <button onClick={() => uctl.reorder(sel.id, -1)} style={miniBtn}>←</button>
+            <button onClick={() => uctl.reorder(sel.id, 1)} style={miniBtn}>→</button>
+            <button onClick={() => uctl.moveEdge(sel.id, "end")} style={miniBtn} title={tt("To the end edge", "لآخر الطرف")}>{tt("Edge", "الطرف")} ⇥</button>
           </div>
+          <button onClick={() => uctl.duplicate(sel.id)} style={{ ...miniBtn, width: "100%", marginTop: 8, flex: "none", borderColor: C.oak, color: C.oakDeep }}>
+            ⧉ {tt("Duplicate this box", "كرّر الصندوق")}
+          </button>
+          <p style={{ fontFamily: "'Hanken Grotesk',sans-serif", fontSize: 12, color: C.muted, marginTop: 10, lineHeight: 1.5 }}>
+            {tt("Tip: add an Empty space box between units to push cabinets to the edges and leave a gap.", "نصيحة: ضيف صندوق «فراغ» بين الوحدات عشان تدفع الخزائن للأطراف وتسيب مساحة في النص.")}
+          </p>
         </div>
       )}
     </div>
@@ -739,6 +750,8 @@ export default function App() {
     update: (id, patch) => setCfg((c) => ({ ...c, [uField]: (c[uField] || []).map((x) => (x.id === id ? { ...x, ...patch } : x)) })),
     move: (from, to) => setCfg((c) => { const u = [...(c[uField] || [])]; if (from < 0 || to < 0 || from >= u.length || to >= u.length) return c; const [m] = u.splice(from, 1); u.splice(to, 0, m); return { ...c, [uField]: u }; }),
     reorder: (id, dir2) => setCfg((c) => { const u = [...(c[uField] || [])]; const i = u.findIndex((x) => x.id === id); const j = i + dir2; if (i < 0 || j < 0 || j >= u.length) return c; [u[i], u[j]] = [u[j], u[i]]; return { ...c, [uField]: u }; }),
+    moveEdge: (id, edge) => setCfg((c) => { const u = [...(c[uField] || [])]; const i = u.findIndex((x) => x.id === id); if (i < 0) return c; const [m] = u.splice(i, 1); if (edge === "start") u.unshift(m); else u.push(m); return { ...c, [uField]: u }; }),
+    duplicate: (id) => setCfg((c) => { const u = [...(c[uField] || [])]; const i = u.findIndex((x) => x.id === id); if (i < 0) return c; const copy = { ...u[i], id: uid() }; u.splice(i + 1, 0, copy); return { ...c, [uField]: u, selectedUnit: copy.id }; }),
   };
 
   const totalSteps = STR.steps.length;
