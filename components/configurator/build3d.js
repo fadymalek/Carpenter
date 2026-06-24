@@ -553,6 +553,52 @@ export function buildKitchen(model, cfg) {
 /* default desk starts empty (a bare top on legs) — modules are added one by one */
 export function defaultDeskUnits() { return []; }
 
+/* ---------------- desk base / frame styles ---------------- */
+const FRAME_FINISH = { black: "#2C2C2E", white: "#E8E8E8", silver: "#C7CACC", raw: "#8A8D90" };
+function deskGlide(model, x, z) { const g = cyl(0.022, 0.014, "#161616", { metal: true, rough: 0.5 }, 14); put(model, g, x, 0.007, z); }
+function addDeskFrame(model, o) {
+  const { frame, finishC, topW, D, H, topT, bodyH, woodC, gloss } = o;
+  const ex = topW / 2 - 0.08, dz = D / 2 - 0.08;
+
+  if (frame === "panel") {
+    [-1, 1].forEach((sx) => put(model, box(0.038, bodyH - 0.01, D - 0.06, woodC, { gloss }), sx * (topW / 2 - 0.02), (bodyH - 0.01) / 2, 0));
+    put(model, box(topW - 0.1, bodyH * 0.55, 0.035, woodC, { gloss }), 0, bodyH * 0.52, -(D / 2) + 0.05); // modesty
+    return;
+  }
+  if (frame === "steel") {
+    [-1, 1].forEach((sx) => {
+      const lx = sx * ex;
+      put(model, box(0.04, bodyH, 0.06, finishC, { metal: true }), lx, bodyH / 2, 0);          // upright flat bar
+      put(model, box(0.06, 0.03, D - 0.05, finishC, { metal: true }), lx, 0.025, 0);            // foot bar
+      put(model, box(0.05, 0.04, D - 0.12, finishC, { metal: true }), lx, bodyH - 0.03, 0);     // top bar
+      deskGlide(model, lx, dz); deskGlide(model, lx, -dz);
+    });
+    put(model, box(topW - 0.12, 0.04, 0.05, finishC, { metal: true }), 0, bodyH - 0.06, -(D / 2) + 0.09); // back beam
+    return;
+  }
+  if (frame === "sitstand") {
+    [-1, 1].forEach((sx) => {
+      const lx = sx * ex;
+      put(model, box(0.06, 0.04, D - 0.04, finishC, { metal: true }), lx, 0.03, 0);             // foot bar
+      deskGlide(model, lx, dz); deskGlide(model, lx, -dz);
+      put(model, box(0.095, bodyH * 0.6, 0.095, finishC, { metal: true }), lx, bodyH * 0.30, 0);         // lower column (wider)
+      put(model, box(0.07, bodyH * 0.55, 0.07, finishC, { metal: true }), lx, bodyH * 0.58, 0);          // upper column (telescopes)
+      put(model, box(0.17, 0.04, D - 0.12, finishC, { metal: true }), lx, bodyH - 0.02, 0);              // top bracket
+    });
+    put(model, box(topW - 0.22, 0.06, 0.06, finishC, { metal: true }), 0, bodyH - 0.12, -(D / 2) + 0.12); // crossbeam
+    put(model, box(0.18, 0.05, 0.07, "#202022", { metal: true }), topW * 0.26, bodyH - 0.17, D / 2 - 0.1); // control box
+    return;
+  }
+  // "legs" — tapered square timber legs (4-sided cone) + apron
+  [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.032, bodyH, 4), pbr(woodC, { gloss }));
+    leg.rotation.y = Math.PI / 4; leg.castShadow = true; leg.receiveShadow = true;
+    put(model, leg, sx * ex, bodyH / 2, sz * dz);
+    deskGlide(model, sx * ex, sz * dz);
+  });
+  put(model, box(topW - 0.16, 0.08, 0.025, woodC, { gloss }), 0, H - topT - 0.05, -(D / 2) + 0.05); // apron
+}
+
 /* ============================ DESK (modular) ============================ */
 export function buildDesk(model, cfg) {
   const D = cfg.dD / 100, H = cfg.dH / 100;
@@ -574,11 +620,11 @@ export function buildDesk(model, cfg) {
   put(model, rbox(topW, topT, D, topC, { gloss }), 0, H - topT / 2, 0);
   put(model, box(topW + 0.004, 0.012, D + 0.004, topC, { gloss }), 0, H - topT, 0);
 
-  // four corner legs + back apron
-  [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => {
-    put(model, box(0.06, bodyH, 0.06, woodC, { gloss }), sx * (topW / 2 - 0.06), bodyH / 2, sz * (D / 2 - 0.07));
+  // base / frame (timber legs · panel ends · steel T-leg · electric sit-stand)
+  addDeskFrame(model, {
+    frame: cfg.dFrame || "legs", finishC: FRAME_FINISH[cfg.dFrameFinish] || FRAME_FINISH.black,
+    topW, D, H, topT, bodyH, woodC, gloss,
   });
-  put(model, box(topW - 0.16, 0.08, 0.025, woodC, { gloss }), 0, H - topT - 0.05, -(D / 2) + 0.05);
 
   // pedestal modules laid left -> right under the top, each pickable
   let cursor = -sumW / 2;
@@ -598,14 +644,15 @@ export function buildDesk(model, cfg) {
     cursor += uw;
   });
 
-  // monitor shelf + modelled monitor
+  // monitor on an articulating arm (clamped to the back edge)
   if (cfg.dMonitor) {
-    const mw = Math.min(topW * 0.5, 0.74);
-    put(model, box(mw, 0.04, 0.2, topC, { gloss }), 0, H + 0.12, -(D / 2) + 0.16);
-    [-1, 1].forEach((s) => put(model, box(0.04, 0.1, 0.04, woodC, { gloss }), s * (mw / 2 - 0.05), H + 0.06, -(D / 2) + 0.16));
-    put(model, box(0.5, 0.3, 0.02, DARKGLASS, { glass: true }), 0, H + 0.32, -(D / 2) + 0.2);
-    put(model, box(0.08, 0.08, 0.02, "#3A3835", { metal: true }), 0, H + 0.16, -(D / 2) + 0.2);
-    put(model, box(0.2, 0.014, 0.1, "#3A3835", { metal: true }), 0, H + 0.155, -(D / 2) + 0.22);
+    const bz = -(D / 2) + 0.05;
+    put(model, box(0.07, 0.06, 0.06, "#202022", { metal: true }), 0, H + 0.03, bz);              // clamp base
+    put(model, cyl(0.013, 0.36, "#2A2A2C", { metal: true }, 16), 0, H + 0.21, bz);               // pole
+    put(model, box(0.24, 0.028, 0.028, "#2A2A2C", { metal: true }), 0.12, H + 0.36, bz + 0.05);  // arm
+    put(model, box(0.62, 0.37, 0.02, "#15161A", { gloss: true }), 0, H + 0.42, bz + 0.13);       // monitor shell
+    put(model, box(0.58, 0.33, 0.008, DARKGLASS, { glass: true }), 0, H + 0.42, bz + 0.142);     // screen
+    put(model, box(0.05, 0.05, 0.03, "#2A2A2C", { metal: true }), 0, H + 0.42, bz + 0.1);        // VESA mount
   }
   // keyboard tray
   if (cfg.dKeyboard) {
