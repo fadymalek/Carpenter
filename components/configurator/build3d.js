@@ -568,12 +568,12 @@ function addDeskFrame(model, o) {
   if (frame === "steel") {
     [-1, 1].forEach((sx) => {
       const lx = sx * ex;
-      put(model, box(0.04, bodyH, 0.06, finishC, { metal: true }), lx, bodyH / 2, 0);          // upright flat bar
-      put(model, box(0.06, 0.03, D - 0.05, finishC, { metal: true }), lx, 0.025, 0);            // foot bar
-      put(model, box(0.05, 0.04, D - 0.12, finishC, { metal: true }), lx, bodyH - 0.03, 0);     // top bar
+      put(model, box(0.06, bodyH, 0.07, finishC, { metal: true }), lx, bodyH / 2, 0);           // upright flat bar
+      put(model, box(0.08, 0.035, D - 0.04, finishC, { metal: true }), lx, 0.03, 0);            // foot bar
+      put(model, box(0.07, 0.045, D - 0.1, finishC, { metal: true }), lx, bodyH - 0.03, 0);     // top bar
       deskGlide(model, lx, dz); deskGlide(model, lx, -dz);
     });
-    put(model, box(topW - 0.12, 0.04, 0.05, finishC, { metal: true }), 0, bodyH - 0.06, -(D / 2) + 0.09); // back beam
+    put(model, box(topW - 0.12, 0.05, 0.06, finishC, { metal: true }), 0, bodyH - 0.07, -(D / 2) + 0.09); // back beam
     return;
   }
   if (frame === "sitstand") {
@@ -591,12 +591,12 @@ function addDeskFrame(model, o) {
   }
   // "legs" — tapered square timber legs (4-sided cone) + apron
   [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => {
-    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.032, bodyH, 4), pbr(woodC, { gloss }));
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.05, bodyH, 4), pbr(woodC, { gloss }));
     leg.rotation.y = Math.PI / 4; leg.castShadow = true; leg.receiveShadow = true;
     put(model, leg, sx * ex, bodyH / 2, sz * dz);
     deskGlide(model, sx * ex, sz * dz);
   });
-  put(model, box(topW - 0.16, 0.08, 0.025, woodC, { gloss }), 0, H - topT - 0.05, -(D / 2) + 0.05); // apron
+  put(model, box(topW - 0.16, 0.09, 0.028, woodC, { gloss }), 0, H - topT - 0.06, -(D / 2) + 0.05); // apron
 }
 
 /* ============================ DESK (modular) ============================ */
@@ -614,7 +614,8 @@ export function buildDesk(model, cfg) {
 
   const units = cfg.dUnits || [];
   const sumW = units.reduce((a, u) => a + (u.w || 45), 0) / 100;
-  const topW = Math.max(sumW + (units.length ? 0.12 : 0), (cfg.dW || 140) / 100);
+  // leave generous overhang past the modules so the frame/legs stay visible
+  const topW = Math.max(sumW + 0.5, (cfg.dW || 140) / 100);
 
   // top + slim edge band (centred at origin, softened edge)
   put(model, rbox(topW, topT, D, topC, { gloss }), 0, H - topT / 2, 0);
@@ -676,17 +677,14 @@ export function buildDesk(model, cfg) {
     put(model, cyl(0.03, 0.02, "#141312", {}, 16), topW * 0.3, H - topT - 0.01, -(D / 2) + 0.14);
   }
 
-  // room around the desk (floor + corner walls), centred on the desk
-  const RW = Math.max(topW + 2.0, 3.0), RL = Math.max(D + 2.0, 2.6), RH = Math.max(H + 1.6, 2.5);
+  // room around the desk (floor + back wall), kept tight so the desk fills the view
+  const RW = Math.max(topW + 1.3, 2.2), RL = Math.max(D + 1.4, 2.0), RH = Math.max(H + 1.5, 2.3);
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(RW + 1, RL + 1), pbr("#E6DDCD"));
   floor.rotation.x = -Math.PI / 2; floor.position.set(0, -0.002, 0); floor.receiveShadow = true; model.add(floor);
-  const wallMat = pbr("#EFE9DF");
-  const back = new THREE.Mesh(new THREE.PlaneGeometry(RW, RH), wallMat);
-  back.position.set(0, RH / 2, -(D / 2) - 0.25); back.receiveShadow = true; model.add(back);
-  const side = new THREE.Mesh(new THREE.PlaneGeometry(RL, RH), wallMat);
-  side.rotation.y = Math.PI / 2; side.position.set(-(RW / 2), RH / 2, 0); side.receiveShadow = true; model.add(side);
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(RW, RH), pbr("#EFE9DF"));
+  back.position.set(0, RH / 2, -(D / 2) - 0.3); back.receiveShadow = true; model.add(back);
 
-  model.userData.focus = { cx: 0, cy: H * 0.7, cz: 0, radius: Math.max(topW, D, H) * 1.7 + 1.0 };
+  model.userData.focus = { cx: 0, cy: H * 0.55, cz: 0, radius: Math.max(topW, D, H) * 1.1 + 0.7 };
 }
 
 /* ---------------- disposal ---------------- */
