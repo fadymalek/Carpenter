@@ -173,6 +173,18 @@ const HARDWARE = [
   { id: "premium", l: L("Premium soft-close", "ممتاز هادئ"), m: 1.15 },
   { id: "pro", l: L("Professional", "احترافي"), m: 1.3 },
 ];
+const FRAMES = [
+  { id: "legs", l: L("Timber legs", "أرجل خشب") },
+  { id: "panel", l: L("Panel ends", "جوانب لوحية") },
+  { id: "steel", l: L("Steel T-leg", "أرجل حديد") },
+  { id: "sitstand", l: L("Electric sit-stand", "كهربائي رفع/خفض") },
+];
+const FRAME_FINISHES = [
+  { id: "black", l: L("Black", "أسود") },
+  { id: "white", l: L("White", "أبيض") },
+  { id: "silver", l: L("Silver", "فضي") },
+  { id: "raw", l: L("Raw steel", "حديد خام") },
+];
 
 const colorOf = (list, id) => (list.find((x) => x.id === id) || list[0]).c;
 
@@ -232,7 +244,7 @@ const DEFAULTS = {
   kW: 360, kH: 270, kD: 60, roomL: 320, kLayout: "straight", kLower: 4, kUpper: 4, kTall: false, kIsland: false,
   kUnits: defaultKUnits(), selectedUnit: null,
   dW: 140, dD: 70, dH: 74, dShape: "straight", dDrawers: 2, dShelves: 1, dSide: false, dCable: true, dMonitor: false, dKeyboard: false,
-  dUnits: [],
+  dUnits: [], dFrame: "legs", dFrameFinish: "black",
   wood: "oak", gloss: false, handle: "bar", hardware: "premium", doorStyle: "shaker", led: false,
   counter: "quartzw", backsplash: "tile",
   deskTop: "oak", leg: "timber",
@@ -262,6 +274,7 @@ function priceRange(cfg) {
     p += du.reduce((a, u) => a + (perMod[u.kind] || 1600), 0);
     p += (cfg.dMonitor ? 900 : 0) + (cfg.dKeyboard ? 700 : 0) + (cfg.dCable ? 400 : 0);
     p += (cfg.dShape === "l" ? 2500 : cfg.dShape === "exec" ? 3500 : 0);
+    p += { legs: 0, panel: 1500, steel: 1800, sitstand: 6500 }[cfg.dFrame] || 0;
     p += { shaker: 0, flat: 400, slab: 800, glass: 1600 }[cfg.doorStyle] || 0;
   }
   if (cfg.gloss) p *= 1.06;
@@ -301,7 +314,7 @@ function Preview3D({ config, lang, snapRef, onPickUnit, onReorder }) {
   propsRef.current = { config, onPickUnit, onReorder };
 
   const geoSig = useMemo(() => {
-    const k = ["product", "kW", "kH", "kD", "roomL", "kLayout", "kUpper", "kTall", "kIsland", "dW", "dD", "dH", "dShape", "dDrawers", "dShelves", "dSide", "dCable", "dMonitor", "dKeyboard", "wood", "gloss", "counter", "backsplash", "deskTop", "leg", "fridge", "microwave", "openShelf", "pantry", "closed", "cpu", "printer", "fileCab", "cableHole", "grommet", "doorStyle", "led"];
+    const k = ["product", "kW", "kH", "kD", "roomL", "kLayout", "kUpper", "kTall", "kIsland", "dW", "dD", "dH", "dShape", "dDrawers", "dShelves", "dSide", "dCable", "dMonitor", "dKeyboard", "wood", "gloss", "counter", "backsplash", "deskTop", "leg", "dFrame", "dFrameFinish", "fridge", "microwave", "openShelf", "pantry", "closed", "cpu", "printer", "fileCab", "cableHole", "grommet", "doorStyle", "led"];
     return k.map((x) => config[x]).join("|") + "|" + JSON.stringify(config.kUnits || []) + "|" + JSON.stringify(config.dUnits || []) + "|" + (config.selectedUnit || "");
   }, [config]);
 
@@ -902,6 +915,14 @@ function StepDimensions({ cfg, set, t, lang, isK, uctl }) {
           <Range label={t("height")} value={cfg.dH} min={68} max={80} unit={t("cm")} onChange={set("dH")} />
           <FieldLabel>{t("deskShape")}</FieldLabel>
           <Pills lang={lang} value={cfg.dShape} onChange={set("dShape")} items={[{ id: "straight", l: L("Straight", "مستقيم") }, { id: "l", l: L("L-shape", "حرف L") }, { id: "exec", l: L("Executive", "تنفيذي") }]} />
+          <FieldLabel>{L("Frame / base", "الهيكل / القاعدة")[lang]}</FieldLabel>
+          <Pills lang={lang} value={cfg.dFrame} onChange={set("dFrame")} items={FRAMES} />
+          {(cfg.dFrame === "steel" || cfg.dFrame === "sitstand") && (
+            <>
+              <FieldLabel>{L("Frame finish", "لون الهيكل")[lang]}</FieldLabel>
+              <Pills lang={lang} value={cfg.dFrameFinish} onChange={set("dFrameFinish")} items={FRAME_FINISHES} />
+            </>
+          )}
           <UnitBuilder cfg={cfg} lang={lang} uctl={uctl} kinds={DESK_KINDS}
             labels={{
               title: L("Desk modules — box by box", "وحدات المكتب — حتة حتة")[lang],
@@ -1001,6 +1022,7 @@ function rowsFor(cfg, lang, isK, t) {
     base.push([STR.countertop[lang], COUNTERS.find((x) => x.id === cfg.counter).l[lang]]);
   } else {
     base.push([STR.deskShape[lang], { straight: "Straight", l: "L-shape", exec: "Executive" }[cfg.dShape]]);
+    base.push([L("Frame", "الهيكل")[lang], (FRAMES.find((f) => f.id === cfg.dFrame) || FRAMES[0]).l[lang]]);
     base.push([L("Modules", "الوحدات")[lang], `${(cfg.dUnits || []).length}`]);
     base.push([STR.deskTop[lang], DESKTOPS.find((x) => x.id === cfg.deskTop).l[lang]]);
   }
