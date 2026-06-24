@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 
 /* ============================================================== *
  *  HEWN & OAK — 3D modeling engine
@@ -233,6 +234,13 @@ function box(w, h, d, color, o = {}) {
   m.castShadow = true; m.receiveShadow = true;
   return m;
 }
+/* rounded/chamfered box — soft edges catch the light like real cabinetry */
+function rbox(w, h, d, color, o = {}) {
+  const r = Math.max(0.002, Math.min(0.01, Math.min(w, h, d) * 0.12));
+  const m = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, r), pbr(color, o));
+  m.castShadow = true; m.receiveShadow = true;
+  return m;
+}
 function put(parent, mesh, x, y, z) { mesh.position.set(x, y, z); parent.add(mesh); return mesh; }
 function cyl(r, h, color, o = {}, seg = 20) {
   const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, seg), pbr(color, o));
@@ -254,17 +262,17 @@ function addHandle(parent, style, x, y, frontZ, vertical) {
 }
 function addDoor(parent, fw, fh, cx, cy, frontZ, color, o, handle, vertical, style = "shaker") {
   if (style === "flat" || style === "slab") {
-    // single flat front (handleless modern / slab)
-    put(parent, box(fw - 0.014, fh - 0.014, 0.02, color, o), cx, cy, frontZ + 0.011);
+    // single flat front (handleless modern / slab) with softened edges
+    put(parent, rbox(fw - 0.014, fh - 0.014, 0.02, color, o), cx, cy, frontZ + 0.011);
   } else if (style === "glass" && fw > 0.16 && fh > 0.16) {
     // framed glass door (display cabinet)
-    put(parent, box(fw - 0.014, fh - 0.014, 0.02, color, o), cx, cy, frontZ + 0.011);
+    put(parent, rbox(fw - 0.014, fh - 0.014, 0.02, color, o), cx, cy, frontZ + 0.011);
     put(parent, box(fw - 0.10, fh - 0.10, 0.012, "#2A3438", { glass: true }), cx, cy, frontZ + 0.016);
   } else {
     // shaker: proud frame + recessed centre
-    put(parent, box(fw - 0.018, fh - 0.018, 0.02, color, o), cx, cy, frontZ + 0.011);
+    put(parent, rbox(fw - 0.018, fh - 0.018, 0.02, color, o), cx, cy, frontZ + 0.011);
     if (fw > 0.18 && fh > 0.18)
-      put(parent, box(fw - 0.13, fh - 0.13, 0.012, color, o), cx, cy, frontZ + 0.005);
+      put(parent, rbox(fw - 0.13, fh - 0.13, 0.012, color, o), cx, cy, frontZ + 0.005);
   }
   const hx = vertical ? cx + fw * 0.34 : cx;
   const hy = vertical ? cy : cy + fh * 0.34;
@@ -347,7 +355,7 @@ function addCabinetRun(parent, o) {
     const cx = cursor + uw / 2;
     const ug = new THREE.Group();
     ug.position.x = cx;
-    ug.userData = { unitId: u.id, unitIndex: i, pickable: true };
+    ug.userData = { unitId: u.id, unitIndex: i, pickable: true, kind: u.kind };
     addBaseUnit(ug, { kind: u.kind, w: uw - gap, D, bodyH, baseY: KICK, topY, woodC, gloss, handle, lowerStyle, counterC, stone, shelves: u.shelves, drawers: u.drawers });
     if (selectedId && u.id === selectedId) {
       const eg = new THREE.EdgesGeometry(new THREE.BoxGeometry(uw - gap + 0.02, bodyH + 0.04, D + 0.04));
@@ -363,9 +371,9 @@ function addCabinetRun(parent, o) {
   // continuous plinth (toe kick)
   put(g, box(runLen - 0.02, KICK, D - 0.07, "#262320"), runLen / 2, KICK / 2, D / 2 - 0.02);
 
-  // worktop with overhang + slim front fascia
+  // worktop with overhang + slim front fascia (softened edge)
   if (counterC) {
-    put(g, box(runLen + 0.02, 0.04, D + 0.035, counterC, { stone, gloss: !stone }), runLen / 2, H + 0.02, D / 2 + 0.005);
+    put(g, rbox(runLen + 0.02, 0.04, D + 0.035, counterC, { stone, gloss: !stone }), runLen / 2, H + 0.02, D / 2 + 0.005);
     put(g, box(runLen + 0.02, 0.018, 0.012, counterC, { stone, gloss: !stone }), runLen / 2, H + 0.001, D + 0.022);
   }
   // backsplash
@@ -531,7 +539,7 @@ export function buildKitchen(model, cfg) {
     put(ig, box(iw, 0.9, id - 0.25, woodC, { gloss }), 0, 0.45, -0.05);
     addDoor(ig, iw * 0.45, 0.8, -iw * 0.24, 0.46, id - 0.25, woodC, { gloss }, cfg.handle, true, lowerStyle);
     addDoor(ig, iw * 0.45, 0.8, iw * 0.24, 0.46, id - 0.25, woodC, { gloss }, cfg.handle, true, lowerStyle);
-    put(ig, box(iw + 0.05, 0.05, id, counterC, { stone, gloss: !stone }), 0, 0.925, 0.02);
+    put(ig, rbox(iw + 0.05, 0.05, id, counterC, { stone, gloss: !stone }), 0, 0.925, 0.02);
     put(ig, box(0.05, 0.92, id - 0.24, counterC, { stone, gloss: !stone }), -iw / 2, 0.46, -0.04);
     put(ig, box(0.05, 0.92, id - 0.24, counterC, { stone, gloss: !stone }), iw / 2, 0.46, -0.04);
     ig.position.set(runLen / 2, 0, Math.min(D + 1.4, RL - 0.7));
@@ -562,8 +570,8 @@ export function buildDesk(model, cfg) {
   const sumW = units.reduce((a, u) => a + (u.w || 45), 0) / 100;
   const topW = Math.max(sumW + (units.length ? 0.12 : 0), (cfg.dW || 140) / 100);
 
-  // top + slim edge band (centred at origin)
-  put(model, box(topW, topT, D, topC, { gloss }), 0, H - topT / 2, 0);
+  // top + slim edge band (centred at origin, softened edge)
+  put(model, rbox(topW, topT, D, topC, { gloss }), 0, H - topT / 2, 0);
   put(model, box(topW + 0.004, 0.012, D + 0.004, topC, { gloss }), 0, H - topT, 0);
 
   // four corner legs + back apron
@@ -578,7 +586,7 @@ export function buildDesk(model, cfg) {
     const uw = (u.w || 45) / 100;
     const ug = new THREE.Group();
     ug.position.set(cursor + uw / 2, 0, 0);
-    ug.userData = { unitId: u.id, unitIndex: i, pickable: true };
+    ug.userData = { unitId: u.id, unitIndex: i, pickable: true, kind: u.kind };
     addBaseUnit(ug, { kind: u.kind, w: uw - 0.01, D: D - 0.02, bodyH, baseY: 0, topY: H, woodC, gloss, handle, lowerStyle: dLower, counterC: null, stone: false, shelves: u.shelves, drawers: u.drawers });
     if (cfg.selectedUnit && u.id === cfg.selectedUnit) {
       const eg = new THREE.EdgesGeometry(new THREE.BoxGeometry(uw - 0.01 + 0.02, bodyH + 0.04, D + 0.02));
