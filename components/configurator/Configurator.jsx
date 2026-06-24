@@ -7,6 +7,7 @@ import {
   Sparkles, Info, MousePointer2, Wrench, X, Maximize2, GripVertical, Trash2,
 } from "lucide-react";
 import { buildKitchen, buildDesk, disposeGroup } from "./build3d";
+import { applyUnitAssets } from "./assets";
 
 /* ================================================================== *
  *  HEWN & OAK — Product Configurator (Kitchens + Office Desks)
@@ -280,11 +281,13 @@ function studioEnv(renderer) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshBasicMaterial({ color: c }));
     m.position.set(x, y, z); sc.add(m);
   };
-  panel(0xffffff, 0, 9, 0, 20, 0.1, 20);   // bright ceiling (key)
-  panel(0xfff0db, -7, 3, 5, 0.1, 9, 9);    // warm left
-  panel(0xd9e6ff, 7, 3, -5, 0.1, 9, 9);    // cool right
-  panel(0xb9b4ad, 0, 3, -9, 20, 9, 0.1);   // neutral back
-  const tex = pmrem.fromScene(sc, 0.5).texture;
+  panel(0xffffff, 0, 9, 0, 12, 0.1, 12);   // bright ceiling softbox (key)
+  panel(0xf4f6fa, 0, 9, 0, 20, 0.1, 20);   // wider soft ceiling fill
+  panel(0xfff0db, -8, 3.5, 4, 0.1, 10, 12);// warm left window
+  panel(0xdfeaff, 8, 3.5, -3, 0.1, 10, 12);// cool right bounce
+  panel(0xb9b4ad, 0, 3, -9.5, 20, 9, 0.1); // neutral back
+  panel(0xc8c2b8, 0, -0.2, 0, 20, 0.1, 20);// soft floor bounce
+  const tex = pmrem.fromScene(sc, 0.6).texture;
   pmrem.dispose();
   sc.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
   return tex;
@@ -319,7 +322,7 @@ function Preview3D({ config, lang, snapRef, onPickUnit, onReorder }) {
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
+    renderer.toneMappingExposure = 1.12;
     mount.appendChild(renderer.domElement);
     renderer.domElement.style.display = "block";
     renderer.domElement.style.touchAction = "none";
@@ -330,19 +333,20 @@ function Preview3D({ config, lang, snapRef, onPickUnit, onReorder }) {
     let envTex = null;
     try { envTex = studioEnv(renderer); scene.environment = envTex; } catch (e) { /* env optional */ }
 
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x9a8f7f, 0.4));
-    scene.add(new THREE.AmbientLight(0xffffff, 0.14));
-    const key = new THREE.DirectionalLight(0xfff2df, 1.15);
-    key.position.set(4.5, 7, 5);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x9a8f7f, 0.32));
+    scene.add(new THREE.AmbientLight(0xffffff, 0.1));
+    const key = new THREE.DirectionalLight(0xfff2df, 1.05);
+    key.position.set(4.5, 8, 5);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
     key.shadow.camera.near = 0.5;
-    key.shadow.camera.far = 30;
-    key.shadow.camera.left = -6; key.shadow.camera.right = 6;
-    key.shadow.camera.top = 6; key.shadow.camera.bottom = -6;
-    key.shadow.bias = -0.0006;
+    key.shadow.camera.far = 40;
+    key.shadow.camera.left = -8; key.shadow.camera.right = 8;
+    key.shadow.camera.top = 8; key.shadow.camera.bottom = -8;
+    key.shadow.bias = -0.0005;
+    key.shadow.radius = 4;
     scene.add(key);
-    const fill = new THREE.DirectionalLight(0x9fb6c4, 0.25);
+    const fill = new THREE.DirectionalLight(0x9fb6c4, 0.22);
     fill.position.set(-5, 3, -4);
     scene.add(fill);
 
@@ -467,6 +471,8 @@ function Preview3D({ config, lang, snapRef, onPickUnit, onReorder }) {
     else buildDesk(model, config);
     s.scene.add(model);
     s.model = model;
+    // swap in real glTF models for any registered cabinet types (no-op until assets added)
+    applyUnitAssets(model, config.product);
 
     // framing: builders attach a focus (room centre + radius); fall back to bbox
     let focus = model.userData.focus;
