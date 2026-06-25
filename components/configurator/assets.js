@@ -3,22 +3,29 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 /* ============================================================== *
- *  glTF asset pipeline (ready for Blender-made models)
+ *  glTF asset pipeline — real models swap in for the procedural
+ *  boxes, fitted to each unit's slot.
  *
- *  The 3D scene is procedural by default. To swap in real models
- *  exported from Blender (File ▸ Export ▸ glTF 2.0 .glb):
- *    1. Drop the .glb files in  /public/models/
- *    2. Register them per product + unit kind in ASSET_URLS below,
- *       e.g.  kitchen: { drawers: "/models/base-drawers.glb" }
- *  Anything registered is loaded and fitted into that unit's slot,
- *  replacing the procedural box. Unregistered kinds stay procedural,
- *  so you can migrate one cabinet type at a time.
+ *  Models: Kenney Furniture Kit (kenney.nl) — CC0, in /public/models.
+ *  Register per product + unit kind below. Each entry is either a
+ *  URL string, or { url, rotY } where rotY rotates the model so its
+ *  front faces the room (+Z). Unregistered kinds stay procedural.
  * ============================================================== */
 
+const F = Math.PI; // Kenney pieces face -Z; rotate 180° so fronts face the room
+
 export const ASSET_URLS = {
-  // kitchen: { door: "/models/k-door.glb", drawers: "/models/k-drawers.glb",
-  //           sink: "/models/k-sink.glb", oven: "/models/k-oven.glb" },
-  // desk:    { drawers: "/models/d-drawers.glb", file: "/models/d-file.glb" },
+  kitchen: {
+    door: { url: "/models/cabinet-door.glb", rotY: F },
+    drawers: { url: "/models/cabinet-drawers.glb", rotY: F },
+    open: { url: "/models/open-shelves.glb", rotY: F },
+  },
+  desk: {
+    drawers: { url: "/models/desk-drawers.glb", rotY: F },
+    file: { url: "/models/desk-drawers.glb", rotY: F },
+    open: { url: "/models/open-shelves.glb", rotY: F },
+    door: { url: "/models/closed-cabinet.glb", rotY: F },
+  },
 };
 
 const _cache = new Map();
@@ -35,31 +42,57 @@ export function loadModel(url) {
   return p;
 }
 
-/* Replace procedural unit groups with loaded glTF models, fitted to each
-   unit's bounding box. No-op until ASSET_URLS is populated. The render loop
-   is continuous, so swapped meshes appear on the next frame automatically. */
+/* Replace each procedural unit group with its registered glTF model,
+   fitted (non-uniform) to fill the unit's slot and oriented to face the
+   room. Geometry/material are deep-cloned so disposing a rebuilt model
+   never corrupts the cached source. No-op until ASSET_URLS is populated. */
 export async function applyUnitAssets(model, product) {
   if (!hasAnyAsset() || !model) return;
   const jobs = [];
   model.traverse((o) => {
     if (o.userData && o.userData.unitId && o.userData.kind) {
-      const url = assetFor(product, o.userData.kind);
-      if (url) jobs.push({ group: o, url });
+      const entry = assetFor(product, o.userData.kind);
+      if (entry) jobs.push({ group: o, entry });
     }
   });
-  for (const { group, url } of jobs) {
+
+  for (const { group, entry } of jobs) {
+    const url = typeof entry === "string" ? entry : entry.url;
+    const rotY = (typeof entry === "object" && entry.rotY) || 0;
     try {
       const src = await loadModel(url);
       const inst = src.clone(true);
-      inst.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
-      const target = new THREE.Box3().setFromObject(group).getSize(new THREE.Vector3());
+      inst.traverse((c) => {
+        if (c.isMesh) {
+          c.geometry = c.geometry.clone();
+          c.material = Array.isArray(c.material) ? c.material.map((m) => m.clone()) : c.material.clone();
+          c.castShadow = true; c.receiveShadow = true;
+        }
+      });
+      inst.rotation.y = rotY;
+
+      // target slot = the unit group's bounding box, in the group's local space
+      const wb = new THREE.Box3().setFromObject(group);
+      const gp = group.position;
+      const tmin = wb.min.clone().sub(gp), tmax = wb.max.clone().sub(gp);
+      const tsz = tmax.clone().sub(tmin);
+
+      inst.updateMatrixWorld(true);
       const ib = new THREE.Box3().setFromObject(inst);
       const isz = ib.getSize(new THREE.Vector3());
-      const s = Math.min(target.x / (isz.x || 1), target.y / (isz.y || 1), target.z / (isz.z || 1));
-      inst.scale.setScalar(s || 1);
-      // keep the selection outline (LineSegments), drop procedural meshes
+      inst.scale.set(tsz.x / (isz.x || 1), tsz.y / (isz.y || 1), tsz.z / (isz.z || 1));
+
+      // re-measure after scaling and snap to the slot (centre x/z, sit on the slot floor)
+      inst.updateMatrixWorld(true);
+      const ib2 = new THREE.Box3().setFromObject(inst);
+      const c2 = ib2.getCenter(new THREE.Vector3());
+      inst.position.x += (tmin.x + tmax.x) / 2 - c2.x;
+      inst.position.z += (tmin.z + tmax.z) / 2 - c2.z;
+      inst.position.y += tmin.y - ib2.min.y;
+
+      // drop procedural meshes, keep the selection outline
       [...group.children].forEach((c) => { if (!c.isLineSegments) group.remove(c); });
       group.add(inst);
-    } catch (e) { /* leave the procedural cabinet as a fallback */ }
+    } catch (e) { /* keep the procedural cabinet as a fallback */ }
   }
 }
