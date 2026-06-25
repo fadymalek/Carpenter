@@ -285,23 +285,32 @@ function priceRange(cfg) {
 
 
 /* Soft studio environment so metal, stone and gloss finishes pick up
-   real reflections instead of looking like flat plastic. */
+   real reflections instead of looking like flat plastic. A warm gradient
+   ceiling + soft side softboxes read like a furniture-showroom lightbox. */
 function studioEnv(renderer) {
   const pmrem = new THREE.PMREMGenerator(renderer);
   const sc = new THREE.Scene();
-  sc.background = new THREE.Color(0x3c3c44);
-  const panel = (c, x, y, z, w, h, d) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshBasicMaterial({ color: c }));
+  // gentle vertical gradient backdrop (brighter top → softer floor)
+  const grad = (() => {
+    const c = document.createElement("canvas"); c.width = 16; c.height = 256;
+    const g = c.getContext("2d").createLinearGradient(0, 0, 0, 256);
+    g.addColorStop(0, "#eef0f4"); g.addColorStop(0.5, "#cfcdc9"); g.addColorStop(1, "#9a958d");
+    const ctx = c.getContext("2d"); ctx.fillStyle = g; ctx.fillRect(0, 0, 16, 256);
+    const t = new THREE.CanvasTexture(c); t.mapping = THREE.EquirectangularReflectionMapping; return t;
+  })();
+  sc.background = grad;
+  const panel = (c, x, y, z, w, h, d, intensity = 1) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshBasicMaterial({ color: new THREE.Color(c).multiplyScalar(intensity) }));
     m.position.set(x, y, z); sc.add(m);
   };
-  panel(0xffffff, 0, 9, 0, 12, 0.1, 12);   // bright ceiling softbox (key)
-  panel(0xf4f6fa, 0, 9, 0, 20, 0.1, 20);   // wider soft ceiling fill
-  panel(0xfff0db, -8, 3.5, 4, 0.1, 10, 12);// warm left window
-  panel(0xdfeaff, 8, 3.5, -3, 0.1, 10, 12);// cool right bounce
-  panel(0xb9b4ad, 0, 3, -9.5, 20, 9, 0.1); // neutral back
-  panel(0xc8c2b8, 0, -0.2, 0, 20, 0.1, 20);// soft floor bounce
-  const tex = pmrem.fromScene(sc, 0.6).texture;
-  pmrem.dispose();
+  panel(0xffffff, 0, 9, 1, 13, 0.1, 9, 1.6);  // main ceiling softbox (key reflection)
+  panel(0xfff4e6, 0, 9.2, -3, 16, 0.1, 16, 1.0); // wide warm ceiling fill
+  panel(0xfff0db, -8.5, 4, 3, 0.1, 11, 13, 1.3); // warm left window
+  panel(0xe6f0ff, 8.5, 4, -2, 0.1, 11, 13, 1.1); // cool right bounce
+  panel(0xb9b4ad, 0, 3.5, -9.5, 22, 10, 0.1);    // neutral back wall
+  panel(0xd2ccc1, 0, -0.4, 0, 22, 0.1, 22);      // soft warm floor bounce
+  const tex = pmrem.fromScene(sc, 0.55).texture;
+  pmrem.dispose(); grad.dispose();
   sc.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
   return tex;
 }
@@ -335,7 +344,7 @@ function Preview3D({ config, lang, snapRef, onPickUnit, onReorder }) {
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.12;
+    renderer.toneMappingExposure = 1.16;
     mount.appendChild(renderer.domElement);
     renderer.domElement.style.display = "block";
     renderer.domElement.style.touchAction = "none";
@@ -346,24 +355,29 @@ function Preview3D({ config, lang, snapRef, onPickUnit, onReorder }) {
     let envTex = null;
     try { envTex = studioEnv(renderer); scene.environment = envTex; } catch (e) { /* env optional */ }
 
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x9a8f7f, 0.32));
-    scene.add(new THREE.AmbientLight(0xffffff, 0.1));
-    const key = new THREE.DirectionalLight(0xfff2df, 1.05);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x9a8f7f, 0.30));
+    scene.add(new THREE.AmbientLight(0xffffff, 0.08));
+    const key = new THREE.DirectionalLight(0xfff2df, 1.15);
     key.position.set(4.5, 8, 5);
     key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.mapSize.set(4096, 4096);
     key.shadow.camera.near = 0.5;
     key.shadow.camera.far = 40;
     key.shadow.camera.left = -8; key.shadow.camera.right = 8;
     key.shadow.camera.top = 8; key.shadow.camera.bottom = -8;
-    key.shadow.bias = -0.0005;
-    key.shadow.radius = 4;
+    key.shadow.bias = -0.0004;
+    key.shadow.normalBias = 0.02;
+    key.shadow.radius = 6;
     scene.add(key);
-    const fill = new THREE.DirectionalLight(0x9fb6c4, 0.22);
+    const fill = new THREE.DirectionalLight(0x9fb6c4, 0.24);
     fill.position.set(-5, 3, -4);
     scene.add(fill);
+    // cool rim/back light to separate edges from the backdrop (premium product look)
+    const rim = new THREE.DirectionalLight(0xdfe8ff, 0.5);
+    rim.position.set(-3, 5, -7);
+    scene.add(rim);
 
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.ShadowMaterial({ opacity: 0.16 }));
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.ShadowMaterial({ opacity: 0.22 }));
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     scene.add(ground);

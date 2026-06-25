@@ -45,7 +45,7 @@ const _clamp255 = (v) => (v < 0 ? 0 : v > 255 ? 255 : v) | 0;
 function _canvasTex(canvas, srgb) {
   const t = new THREE.CanvasTexture(canvas);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.anisotropy = 8;
+  t.anisotropy = 16;
   if (srgb && "sRGBEncoding" in THREE) t.encoding = THREE.sRGBEncoding;
   t.needsUpdate = true;
   return t;
@@ -74,33 +74,114 @@ function _normalFrom(srcCanvas, strength) {
   return out;
 }
 
-/* natural wood: wavy vertical grain + fine fibre noise */
+/* Tileable, anisotropic value-noise field. Each octave is a random lattice with
+   independent X/Y cell counts (taller-than-wide cells stretch features ALONG the
+   grain), and every lookup wraps modulo the lattice, so the result repeats perfectly
+   in both U and V — no seams when the texture tiles physically across a big panel. */
+function _woodField(seed) {
+  const rnd = _seedRand(seed || 1);
+  const SPECS = [[6, 2], [12, 4], [24, 8], [48, 16], [96, 32]]; // [cellsX, cellsY], ~3:1 anisotropy
+  const grids = SPECS.map(([Gx, Gy]) => {
+    const g = new Float32Array(Gx * Gy);
+    for (let i = 0; i < g.length; i++) g[i] = rnd();
+    return { Gx, Gy, g };
+  });
+  const smooth = (t) => t * t * (3 - 2 * t);
+  const sample = ({ Gx, Gy, g }, u, v) => {
+    const x = u * Gx, y = v * Gy;
+    const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+    const at = (a, b) => g[(((b % Gy) + Gy) % Gy) * Gx + (((a % Gx) + Gx) % Gx)];
+    const v00 = at(ix, iy), v10 = at(ix + 1, iy), v01 = at(ix, iy + 1), v11 = at(ix + 1, iy + 1);
+    const ux = smooth(fx), uy = smooth(fy);
+    const a = v00 + (v10 - v00) * ux, b = v01 + (v11 - v01) * ux;
+    return a + (b - a) * uy;
+  };
+  return (u, v, w) => {                       // weighted fbm over the octaves
+    let s = 0, n = 0;
+    for (let i = 0; i < w.length; i++) { if (!w[i]) continue; s += w[i] * sample(grids[i], u, v); n += w[i]; }
+    return n ? s / n : 0;
+  };
+}
+
+/* per-species look. The grain is built as MANY fine, near-straight parallel lines
+   (premium quarter-sawn look) — `wander` is deliberately tiny so lines stay clean
+   and never turn into the wavy "water ripple" that exaggerated warp produces.
+   lines  = number of grain lines across one physical tile (~0.42 m)
+   wander = how much the lines drift sideways (keep small: 0.05–0.18)
+   bands  = strength of slow earlywood/latewood lightness zones
+   contrast = light↔dark spread of the wood colour
+   pore   = fine fibre/pore micro-detail amount */
+const WOOD_LOOK = {
+  c49a6c: { lines: 22, wander: 0.14, bands: 0.5, contrast: 0.26, pore: 0.45 }, // oak
+  "5c3b22": { lines: 26, wander: 0.16, bands: 0.55, contrast: 0.3, pore: 0.4 },// walnut — a touch more figure
+  d6c5a6: { lines: 20, wander: 0.08, bands: 0.35, contrast: 0.18, pore: 0.3 }, // ash — straight & pale
+  "3b2a1e": { lines: 26, wander: 0.12, bands: 0.45, contrast: 0.22, pore: 0.3 },// espresso — dark, subtle
+  cdb386: { lines: 40, wander: 0.04, bands: 0.25, contrast: 0.16, pore: 0.22 },// bamboo — very fine, straight
+  b0793f: { lines: 16, wander: 0.10, bands: 0.5, contrast: 0.32, pore: 0.4 },  // butcher block — bolder strips
+};
+
+/* natural wood: tileable, mostly-straight quarter-sawn grain. Built from a dense
+   set of fine parallel grain lines (two frequencies) that drift only slightly, plus
+   slow earlywood/latewood lightness zones and fine pores. Outputs colour + a gentle
+   normal map (pores, no corrugation) + a roughness map so the figure catches light
+   like a real satin-lacquered board — clean, not wavy. */
 function woodTextures(hex) {
   const key = "wood:" + hex;
   if (_texCache.has(key)) return _texCache.get(key);
-  const S = 512, cc = _canvas(S), ctx = cc.getContext("2d"), hc = _canvas(S), hx = hc.getContext("2d");
+  const S = 512;
+  const cc = _canvas(S), ctx = cc.getContext("2d");
+  const hc = _canvas(S), hx = hc.getContext("2d");
+  const rc = _canvas(S), rx = rc.getContext("2d");
   const base = new THREE.Color("#" + hex);
-  const br = base.r * 255, bg = base.g * 255, bb = base.b * 255;
-  const img = ctx.createImageData(S, S), hd = hx.createImageData(S, S);
-  const rnd = _seedRand(parseInt(hex, 16));
+  const look = WOOD_LOOK[hex] || { lines: 24, wander: 0.12, bands: 0.45, contrast: 0.26, pore: 0.35 };
+  const dark = base.clone().multiplyScalar(1 - look.contrast);
+  const light = base.clone().multiplyScalar(1 + look.contrast * 0.4);
+  const img = ctx.createImageData(S, S), hd = hx.createImageData(S, S), rd = rx.createImageData(S, S);
+  const fbm = _woodField(parseInt(hex, 16));
+
+  const W_WANDER = [0.5, 0.85, 0.5, 0.15, 0.0]; // gentle sideways drift of the lines
+  const W_BAND = [1.0, 0.45, 0.0, 0.0, 0.0];    // slow growth-zone lightness drift
+  const W_PORE = [0.0, 0.0, 0.15, 0.6, 1.0];    // fine pores / fibre
+
+  const LINES = look.lines, LINES2 = LINES * 2.6; // primary + finer secondary fibre
   let i = 0;
-  for (let y = 0; y < S; y++) {
-    const warp = Math.sin(y * 0.013) * 6 + Math.sin(y * 0.061 + 1.3) * 2.4;
-    for (let x = 0; x < S; x++) {
-      const xx = x + warp;
-      let ring = Math.sin(xx * 0.20 + Math.sin(xx * 0.018) * 3.0); // -1..1
-      ring = (ring + 1) * 0.5;
-      const grain = Math.pow(ring, 1.7);                            // sharpen to thin figure
-      const noise = (rnd() - 0.5) * 0.07;
-      const s = 0.82 + grain * 0.30 + noise;                        // ~0.78..1.16
-      img.data[i] = _clamp255(br * s); img.data[i + 1] = _clamp255(bg * s); img.data[i + 2] = _clamp255(bb * s); img.data[i + 3] = 255;
-      const hv = _clamp255(grain * 255);
+  for (let py = 0; py < S; py++) {
+    const v = py / S;
+    for (let px = 0; px < S; px++) {
+      const u = px / S;
+      // grain runs vertically (lines vary in u). The wander is small, so lines stay
+      // near-straight with only a believable hand-planed waviness.
+      const wander = (fbm(u, v, W_WANDER) - 0.5) * look.wander;
+      const lc = u * LINES + wander;
+      const fr = lc - Math.floor(lc);
+      const line = Math.pow(1 - Math.abs(2 * fr - 1), 6.5);         // thin primary grain line
+      const fc = u * LINES2 + wander * 1.6;
+      const fr2 = fc - Math.floor(fc);
+      const fib = Math.pow(1 - Math.abs(2 * fr2 - 1), 11) * 0.55;   // fainter fibre between lines
+      const band = fbm(u, v, W_BAND) - 0.5;                          // slow lightness zones
+      const pore = fbm(u, v, W_PORE) - 0.5;                          // micro detail
+
+      let d = 0.62 * line + 0.24 * fib;                              // 0 = open wood, 1 = dark line
+      d = d < 0 ? 0 : d > 1 ? 1 : d;
+      const shade = 1 + band * look.bands * 0.22 + pore * 0.05;      // tonal zones + micro speckle
+      img.data[i] = _clamp255((light.r + (dark.r - light.r) * d) * 255 * shade);
+      img.data[i + 1] = _clamp255((light.g + (dark.g - light.g) * d) * 255 * shade);
+      img.data[i + 2] = _clamp255((light.b + (dark.b - light.b) * d) * 255 * shade);
+      img.data[i + 3] = 255;
+
+      // height: pores + a hint of line relief (kept low → grain you can feel, not ridges)
+      const h = 0.5 + look.pore * (pore * 0.7) - line * 0.18;
+      const hv = _clamp255(h * 255);
       hd.data[i] = hv; hd.data[i + 1] = hv; hd.data[i + 2] = hv; hd.data[i + 3] = 255;
+
+      // dark grain lines read a touch rougher than the open, lacquered wood
+      const rv = _clamp255((0.55 + 0.22 * d) * 255);
+      rd.data[i] = rv; rd.data[i + 1] = rv; rd.data[i + 2] = rv; rd.data[i + 3] = 255;
       i += 4;
     }
   }
-  ctx.putImageData(img, 0, 0); hx.putImageData(hd, 0, 0);
-  const res = { map: _canvasTex(cc, true), normalMap: _canvasTex(_normalFrom(hc, 2.2), false) };
+  ctx.putImageData(img, 0, 0); hx.putImageData(hd, 0, 0); rx.putImageData(rd, 0, 0);
+  const res = { map: _canvasTex(cc, true), normalMap: _canvasTex(_normalFrom(hc, 0.7), false), roughnessMap: _canvasTex(rc, false) };
   _texCache.set(key, res);
   return res;
 }
@@ -177,23 +258,56 @@ function tileTextures(hex) {
   return res;
 }
 
+/* sprayed-lacquer MDF: faint uneven tone + micro "orange peel" so painted doors
+   read as real sprayed cabinetry catching soft highlights, not flat plastic. */
+function paintedTextures(hex) {
+  const key = "paint:" + hex;
+  if (_texCache.has(key)) return _texCache.get(key);
+  const S = 256, cc = _canvas(S), ctx = cc.getContext("2d"), hc = _canvas(S), hx = hc.getContext("2d");
+  const base = new THREE.Color("#" + hex);
+  const br = base.r * 255, bg = base.g * 255, bb = base.b * 255;
+  const img = ctx.createImageData(S, S), hd = hx.createImageData(S, S);
+  const fbm = _woodField(parseInt(hex, 16) ^ 0x7a1);
+  const W_BLOTCH = [1.0, 0.6, 0.2, 0.0, 0.0], W_PEEL = [0.0, 0.0, 0.2, 0.7, 1.0];
+  let i = 0;
+  for (let py = 0; py < S; py++) {
+    const v = py / S;
+    for (let px = 0; px < S; px++) {
+      const u = px / S;
+      const blotch = fbm(u, v, W_BLOTCH) - 0.5;   // slow spray unevenness
+      const peel = fbm(u, v, W_PEEL) - 0.5;        // fine surface micro-relief
+      const s = 1 + blotch * 0.035 + peel * 0.014; // keep very subtle (±~4%)
+      img.data[i] = _clamp255(br * s); img.data[i + 1] = _clamp255(bg * s); img.data[i + 2] = _clamp255(bb * s); img.data[i + 3] = 255;
+      const hv = _clamp255((0.5 + peel) * 255);
+      hd.data[i] = hv; hd.data[i + 1] = hv; hd.data[i + 2] = hv; hd.data[i + 3] = 255;
+      i += 4;
+    }
+  }
+  ctx.putImageData(img, 0, 0); hx.putImageData(hd, 0, 0);
+  const res = { map: _canvasTex(cc, true), normalMap: _canvasTex(_normalFrom(hc, 0.5), false) };
+  _texCache.set(key, res);
+  return res;
+}
+
 /* ---------------- material + primitive helpers ---------------- */
 function pbr(color, o = {}) {
   const col = new THREE.Color(color);
-  if (o.glass) return new THREE.MeshStandardMaterial({ color: col, roughness: 0.08, metalness: 0.25, envMapIntensity: 1.0 });
-  if (o.metal) return new THREE.MeshStandardMaterial({ color: col, roughness: o.rough ?? 0.32, metalness: 0.95, envMapIntensity: 1.15 });
+  if (o.glass) return new THREE.MeshPhysicalMaterial({ color: col, roughness: 0.06, metalness: 0.0, transmission: 0.0, clearcoat: 1.0, clearcoatRoughness: 0.04, envMapIntensity: 1.3, reflectivity: 0.6 });
+  if (o.metal) return new THREE.MeshPhysicalMaterial({ color: col, roughness: o.rough ?? 0.28, metalness: 1.0, envMapIntensity: 1.35, clearcoat: o.brushed ? 0.0 : 0.25, clearcoatRoughness: 0.3 });
 
   const hx = hexOf(color);
 
   // stone worktops / slabs
   const stoneType = o.stone ? (STONE_BY_HEX[hx] || "quartz") : STONE_BY_HEX[hx];
   if (stoneType) {
+    const polished = stoneType === "quartz" || stoneType === "marble";
     const m = new THREE.MeshPhysicalMaterial({
-      color: col, metalness: 0.0, envMapIntensity: 1.0,
-      roughness: stoneType === "granite" ? 0.4 : stoneType === "concrete" ? 0.72 : 0.22,
-      clearcoat: stoneType === "concrete" ? 0.0 : 0.6, clearcoatRoughness: 0.25,
+      color: col, metalness: 0.0, envMapIntensity: 1.2,
+      roughness: stoneType === "granite" ? 0.32 : stoneType === "concrete" ? 0.72 : 0.16,
+      clearcoat: stoneType === "concrete" ? 0.0 : polished ? 0.85 : 0.6,
+      clearcoatRoughness: polished ? 0.12 : 0.25,
     });
-    if (_hasDoc) { const t = stoneTextures(hx, stoneType); m.map = t.map; m.normalMap = t.normalMap; m.normalScale = new THREE.Vector2(0.4, 0.4); }
+    if (_hasDoc) { const t = stoneTextures(hx, stoneType); m.map = t.map; m.normalMap = t.normalMap; m.normalScale = new THREE.Vector2(0.35, 0.35); }
     return m;
   }
 
@@ -209,35 +323,78 @@ function pbr(color, o = {}) {
   if (grain) {
     const gl = o.gloss;
     const m = new THREE.MeshPhysicalMaterial({
-      color: col, metalness: 0.0, envMapIntensity: gl ? 1.0 : 0.7,
-      roughness: gl ? 0.3 : 0.62, clearcoat: gl ? 0.9 : 0.12, clearcoatRoughness: gl ? 0.1 : 0.5,
+      color: col, metalness: 0.0, envMapIntensity: gl ? 1.05 : 0.9,
+      roughness: gl ? 0.26 : 0.55,
+      clearcoat: gl ? 1.0 : 0.35, clearcoatRoughness: gl ? 0.08 : 0.42, // satin lacquer over the grain
     });
-    if (_hasDoc) { const t = woodTextures(hx); m.map = t.map; m.normalMap = t.normalMap; const s = gl ? 0.45 : 0.85; m.normalScale = new THREE.Vector2(s, s); }
+    if (_hasDoc) {
+      const t = woodTextures(hx); m.map = t.map; m.normalMap = t.normalMap; m.roughnessMap = t.roughnessMap;
+      const s = gl ? 0.18 : 0.3; m.normalScale = new THREE.Vector2(s, s);
+    }
     return m;
   }
 
   // painted MDF / laminate (white, charcoal, sage, navy, black laminate)
   if (PAINTED_HEX.has(hx)) {
     const gl = o.gloss;
-    return new THREE.MeshPhysicalMaterial({
+    const m = new THREE.MeshPhysicalMaterial({
       color: col, metalness: 0.0,
       roughness: gl ? 0.16 : 0.5, clearcoat: gl ? 1.0 : 0.25, clearcoatRoughness: gl ? 0.06 : 0.4,
       envMapIntensity: gl ? 1.25 : 0.7,
     });
+    if (_hasDoc) { const t = paintedTextures(hx); m.map = t.map; m.normalMap = t.normalMap; m.normalScale = new THREE.Vector2(gl ? 0.05 : 0.12, gl ? 0.05 : 0.12); }
+    return m;
   }
 
   // fallback (toe kicks, neutrals)
   return new THREE.MeshStandardMaterial({ color: col, roughness: 0.82, metalness: 0.04, envMapIntensity: 0.6 });
 }
+/* Box/RoundedBoxGeometry UVs are 0..1 per face regardless of physical size, so a
+   procedural grain texture stretches into a single warped wave across a big panel
+   (the "rippled curtain" look). Rescale each face's UV by its real size / a fixed
+   tile so grain/stone/tile repeat at a constant physical density on every mesh. */
+function tileUV(geo, w, h, d, tile) {
+  const uv = geo.attributes.uv;
+  if (!uv || !geo.groups || geo.groups.length < 6) return geo;
+  const dims = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]]; // +x,-x,+y,-y,+z,-z
+  const idxArr = geo.index ? geo.index.array : null;
+  const touched = new Uint8Array(uv.count);
+  for (let gi = 0; gi < 6; gi++) {
+    const grp = geo.groups[gi];
+    const [fw, fh] = dims[gi];
+    const su = Math.max(fw / tile, 0.05), sv = Math.max(fh / tile, 0.05);
+    for (let k = grp.start; k < grp.start + grp.count; k++) {
+      const vi = idxArr ? idxArr[k] : k;
+      if (touched[vi]) continue;
+      touched[vi] = 1;
+      uv.setXY(vi, uv.getX(vi) * su, uv.getY(vi) * sv);
+    }
+  }
+  uv.needsUpdate = true;
+  return geo;
+}
+function tileSizeFor(hx) {
+  if (GRAIN_BY_HEX[hx]) return 0.42;
+  if (STONE_BY_HEX[hx]) return 0.9;
+  if (TILE_HEX.has(hx)) return 0.32;
+  if (PAINTED_HEX.has(hx)) return 0.7; // sprayed-lacquer micro-texture, near-isotropic
+  return null;
+}
 function box(w, h, d, color, o = {}) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), pbr(color, o));
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const tile = tileSizeFor(hexOf(color));
+  if (tile) tileUV(geo, w, h, d, tile);
+  const m = new THREE.Mesh(geo, pbr(color, o));
   m.castShadow = true; m.receiveShadow = true;
   return m;
 }
 /* rounded/chamfered box — soft edges catch the light like real cabinetry */
 function rbox(w, h, d, color, o = {}) {
-  const r = Math.max(0.002, Math.min(0.01, Math.min(w, h, d) * 0.12));
-  const m = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, r), pbr(color, o));
+  const r = Math.max(0.0025, Math.min(0.012, Math.min(w, h, d) * 0.14));
+  const geo = new RoundedBoxGeometry(w, h, d, 4, r); // 4 segments → smoother eased edge
+  const tile = tileSizeFor(hexOf(color));
+  if (tile) tileUV(geo, w, h, d, tile);
+  const m = new THREE.Mesh(geo, pbr(color, o));
   m.castShadow = true; m.receiveShadow = true;
   return m;
 }
